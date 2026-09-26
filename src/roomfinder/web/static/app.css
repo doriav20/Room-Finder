@@ -127,6 +127,11 @@ body {
   direction: rtl;
 }
 
+/* A clicked neighborhood shows as chosen; the browser's focus frame around it only confuses */
+.areas-map path.leaflet-interactive:focus {
+  outline: none;
+}
+
 .areas-map .area-label {
   background: transparent;
   border: 0;
