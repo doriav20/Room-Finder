@@ -389,7 +389,8 @@ async def export_csv(request: Request) -> Response:
     writer.writerow(
         [
             "אתר", "סטטוס", "מתאימה", "מחיר", "חדרים", "מ״ר", "קומה", "כתובת", "עיר",
-            "פרטי/תיווך", "סוג נכס", "נמצאה", "נראתה לאחרונה", "הוסרה", "הערות", "קישור",
+            "פרטי/תיווך", "סוג נכס", "ריהוט", "חניה", "נמצאה", "נראתה לאחרונה", "הוסרה",
+            "הערות", "תיאור", "קישור",
         ]
     )  # fmt: skip
     async with _sessionmaker(request)() as session:
@@ -407,10 +408,13 @@ async def export_csv(request: Request) -> Response:
                     listing.city or "",
                     {True: "תיווך", False: "פרטי"}.get(listing.is_agency, ""),
                     formatting.property_label(listing.property_type),
+                    furniture_label(listing) or "",
+                    parking_label(listing) or "",
                     formatting.local_datetime(listing.first_seen_at, settings.timezone),
                     formatting.local_datetime(listing.last_seen_at, settings.timezone),
                     formatting.local_datetime(listing.removed_at, settings.timezone),
                     listing.notes or "",
+                    listing.description or "",
                     listing.url,
                 ]
             )

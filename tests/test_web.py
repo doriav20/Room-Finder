@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.main import create_app
-from roomfinder.models import Listing, ListingStatus, PriceChange
+from roomfinder.models import Listing, ListingStatus, PriceChange, Setting
 
 
 @pytest.fixture
@@ -134,13 +134,45 @@ def test_updates_api_reports_new_matching_listings(client, db):
 
 
 def test_csv_export(client, db):
-    add_listing(db, "a", notes="מעניין")
+    add_listing(db, "a", notes="מעניין", furnished=True, parking=True, parking_spaces=2)
 
     response = client.get("/export.csv")
 
     assert response.headers["content-type"].startswith("text/csv")
     assert response.text.startswith("﻿אתר,")
     assert "יד2" in response.text and "מעניין" in response.text
+    assert ",מרוהטת,2 חניות," in response.text
+
+
+def test_furniture_and_parking_filters_and_chips(client, db):
+    add_listing(db, "a", price=5100, furnished=True, parking=True, description="דירה\nמרווחת")
+    add_listing(db, "b", price=5200, street="ביאליק", furnished=False, parking=False)
+    add_listing(db, "c", price=5300, street="הגפן")
+
+    page = client.get("/?tab=all").text
+    furnished = client.get("/?tab=all&furnished=yes").text
+    no_parking = client.get("/?tab=all&parking=no").text
+
+    assert "🛋 מרוהטת" in page and "🛋 לא מרוהטת" in page and "🚗 אין חניה" in page
+    assert "תיאור המודעה" in page
+    assert "5,100 ₪" in furnished and "5,200 ₪" not in furnished and "5,300 ₪" not in furnished
+    assert "5,200 ₪" in no_parking and "5,100 ₪" not in no_parking
+
+
+def test_furniture_and_parking_criteria_are_saved(client, db):
+    response = client.post(
+        "/settings/criteria",
+        data={"city": "ראשון לציון", "rooms_min": "4", "rooms_max": "4", "furnished": "yes",
+              "parking_required": "1"},
+        follow_redirects=False,
+    )  # fmt: skip
+
+    assert response.status_code == 303
+    saved = db.get(Setting, "criteria").value
+    assert (saved["furnished"], saved["parking_required"]) == ("yes", True)
+    assert '<option value="yes" selected>מרוהטת בלבד</option>' in client.get("/settings").text
+    bad = client.post("/settings/criteria", data={"rooms_min": "4", "furnished": "maybe"})
+    assert bad.status_code == 400
 
 
 def test_sources_page_and_source_settings(client):
