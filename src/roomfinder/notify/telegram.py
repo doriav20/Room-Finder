@@ -1,18 +1,20 @@
 """Telegram bot: sends listings to the allowed users and handles buttons and commands.
 
-Telegram bots are public, so access is enforced here. A user is allowed only after opening a
-one-time link created in the dashboard (which is reachable from this computer only). Every
+Telegram bots are public, so access is enforced here. A Telegram user is allowed only after
+opening a one-time link that a signed-in dashboard user created for their own account. Every
 update is checked against the allowed Telegram user ids; anyone else is ignored without a
-reply.
+reply. When a dashboard account is disabled, its Telegram chats are removed with it.
 """
 
 import html
 import logging
 import secrets
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message, Update
 from telegram.constants import ChatType, ParseMode
@@ -28,7 +30,14 @@ from telegram.ext import (
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.labels import furniture_label, parking_label
-from roomfinder.models import Listing, ListingStatus, Notification, SourceState, TelegramChat
+from roomfinder.models import (
+    Listing,
+    ListingStatus,
+    Notification,
+    SourceState,
+    TelegramChat,
+    User,
+)
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, PropertyType
 from roomfinder.settings_store import get_preferences, save_preferences
 
@@ -45,21 +54,28 @@ HELP_TEXT = (
 )
 
 
+@dataclass(frozen=True)
+class PairingRequest:
+    expires_at: datetime
+    # The dashboard account the Telegram chat will belong to
+    account_id: int | None
+
+
 class PairingCodes:
     """Short-lived one-time codes that let a Telegram user join the allowed list."""
 
     def __init__(self, ttl: timedelta = PAIRING_TTL) -> None:
         self.ttl = ttl
-        self._expiry: dict[str, datetime] = {}
+        self._pending: dict[str, PairingRequest] = {}
 
-    def create(self) -> str:
+    def create(self, account_id: int | None = None) -> str:
         code = secrets.token_urlsafe(16)
-        self._expiry[code] = utcnow() + self.ttl
+        self._pending[code] = PairingRequest(utcnow() + self.ttl, account_id)
         return code
 
-    def consume(self, code: str) -> bool:
-        expiry = self._expiry.pop(code, None)
-        return expiry is not None and expiry > utcnow()
+    def consume(self, code: str) -> PairingRequest | None:
+        request = self._pending.pop(code, None)
+        return request if request is not None and request.expires_at > utcnow() else None
 
 
 def _rooms(value: float | None) -> str | None:
@@ -195,30 +211,44 @@ class TelegramService:
             await self.application.stop()
         await self.application.shutdown()
 
-    def pairing_link(self) -> str:
-        return f"https://t.me/{self.username}?start={self.pairing.create()}"
+    def pairing_link(self, account_id: int | None = None) -> str:
+        return f"https://t.me/{self.username}?start={self.pairing.create(account_id)}"
 
     # --- access ---------------------------------------------------------------
 
+    @staticmethod
+    def _allowed_chats():
+        # Chats of disabled accounts don't count (they're also deleted when disabling)
+        return (
+            select(TelegramChat)
+            .outerjoin(User, User.id == TelegramChat.account_id)
+            .where(or_(TelegramChat.account_id.is_(None), User.is_active.is_(True)))
+        )
+
     async def allowed_chat_ids(self) -> list[int]:
         async with self.sessionmaker() as session:
-            return list(await session.scalars(select(TelegramChat.chat_id)))
+            return [chat.chat_id for chat in await session.scalars(self._allowed_chats())]
 
     async def is_allowed(self, user_id: int | None) -> bool:
         if user_id is None:
             return False
         async with self.sessionmaker() as session:
             found = await session.scalar(
-                select(TelegramChat.chat_id).where(TelegramChat.user_id == user_id)
+                self._allowed_chats().where(TelegramChat.user_id == user_id)
             )
             return found is not None
 
     async def pair(self, code: str, chat_id: int, user_id: int, name: str) -> bool:
         """Allow this user, if the one-time code is valid."""
-        if not self.pairing.consume(code):
+        request = self.pairing.consume(code)
+        if request is None:
             return False
         async with self.sessionmaker() as session:
-            await session.merge(TelegramChat(chat_id=chat_id, user_id=user_id, name=name))
+            await session.merge(
+                TelegramChat(
+                    chat_id=chat_id, user_id=user_id, name=name, account_id=request.account_id
+                )
+            )
             await session.commit()
         log.info("Telegram user %s (%s) is now allowed", name, user_id)
         return True
@@ -241,7 +271,10 @@ class TelegramService:
         await self._send_listing(listing, text, "price_drop", silent)
 
     async def message(self, text: str, *, silent: bool = False) -> None:
-        for chat_id in await self.allowed_chat_ids():
+        await self.send_text(await self.allowed_chat_ids(), text, silent=silent)
+
+    async def send_text(self, chat_ids: Iterable[int], text: str, *, silent: bool = False) -> None:
+        for chat_id in chat_ids:
             await self.bot.send_message(
                 chat_id,
                 text,

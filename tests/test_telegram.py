@@ -6,7 +6,7 @@ from sqlalchemy import select
 from telegram.error import BadRequest
 
 from roomfinder.config import Settings
-from roomfinder.models import Listing, ListingStatus, Notification
+from roomfinder.models import Listing, ListingStatus, Notification, TelegramChat, User
 from roomfinder.notify.telegram import (
     PairingCodes,
     TelegramService,
@@ -93,13 +93,29 @@ def start_update(user_id: int, chat_type: str = "private"):
 
 def test_pairing_codes_are_single_use_and_expire():
     codes = PairingCodes()
-    code = codes.create()
-    assert codes.consume(code) is True
-    assert codes.consume(code) is False
+    code = codes.create(account_id=7)
+    assert codes.consume(code).account_id == 7
+    assert codes.consume(code) is None
 
     expired = PairingCodes(ttl=timedelta(seconds=-1))
-    assert expired.consume(expired.create()) is False
-    assert codes.consume("made-up") is False
+    assert expired.consume(expired.create()) is None
+    assert codes.consume("made-up") is None
+
+
+async def test_chats_belong_to_accounts_and_stop_with_them(service, session):
+    member = User(username="noa", username_key="noa", password_hash="x", role="member")
+    session.add(member)
+    await session.commit()
+
+    assert await service.pair(service.pairing.create(member.id), 11, 11, "Noa")
+    chat = await session.get(TelegramChat, 11)
+    assert chat.account_id == member.id
+    assert await service.is_allowed(11)
+
+    member.is_active = False
+    await session.commit()
+    assert not await service.is_allowed(11)
+    assert await service.allowed_chat_ids() == []
 
 
 def test_new_listing_message():
