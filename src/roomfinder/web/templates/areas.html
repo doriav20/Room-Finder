@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}שכונות · RoomFinder{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', path='vendor/leaflet/leaflet.css') }}">{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
+  <h1 class="h3 mb-0">שכונות</h1>
+  <span class="text-body-secondary">איפה לחפש ב{{ criteria.city }}</span>
+</div>
+
+{% if saved %}
+<div class="alert alert-success">✔ השכונות נשמרו. ההתאמה של כל המודעות חושבה מחדש.</div>
+{% endif %}
+
+{% if not city_map %}
+<div class="alert alert-info">אין עדיין מפת שכונות ל{{ criteria.city }}, ולכן החיפוש כולל את כל העיר.</div>
+{% else %}
+<form id="areas-form" method="post" action="/areas" class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm overflow-hidden">
+      <div class="areas-map-wrap">
+        <div id="areas-map" class="areas-map" dir="ltr" role="region" aria-label="מפת השכונות"></div>
+        <button type="button" id="areas-draw" class="btn btn-light btn-sm shadow-sm areas-draw"
+                title="אחרי הלחיצה, גוררים סביב כמה שכונות כדי לבחור את כולן">✏️ סימון בציור</button>
+      </div>
+      <div class="card-footer bg-body small text-body-secondary">
+        לחיצה על שכונה בוחרת אותה, ולחיצה נוספת מבטלת. אפשר גם ללחוץ על <b>סימון בציור</b> ולגרור סביב כמה שכונות.
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-body d-flex align-items-center">
+        <span class="fw-semibold">📍 השכונות שלי</span>
+        <span class="ms-auto badge text-bg-primary" id="areas-selected"></span>
+      </div>
+      <div class="card-body">
+        <div class="d-flex gap-2 mb-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-choose="all">בחר הכול</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-choose="none">נקה</button>
+          <span class="ms-auto small text-body-secondary align-self-center" title="מודעות שמתאימות לשאר החיפוש">מודעות</span>
+        </div>
+        <div class="area-list">
+          {% for area in city_map.areas %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="areas" value="{{ area.name }}" id="area-{{ loop.index }}"
+                   {% if area.name in criteria.areas %}checked{% endif %}>
+            <label class="form-check-label d-flex" for="area-{{ loop.index }}">
+              <span>{{ area.name }}</span>
+              <span class="ms-auto text-body-secondary small">{{ counts[area.name] }}</span>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+        <hr>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" role="switch" name="unknown_area_ok" value="1" id="unknown_area_ok"
+                 {% if criteria.unknown_area_ok %}checked{% endif %}>
+          <label class="form-check-label" for="unknown_area_ok">
+            גם מודעות שלא ברור באיזו שכונה הן <span class="text-body-secondary small">({{ unknown_count }} עכשיו)</span>
+          </label>
+        </div>
+        <div class="small text-body-secondary mt-2">
+          מודעה עם נקודה על המפה (יד2, מדלן, OnMap) משויכת לשכונה שהנקודה בתוכה. בקומו ובהומלס, לפי שם השכונה שבמודעה.
+        </div>
+      </div>
+      <div class="card-footer bg-body d-flex align-items-center gap-3">
+        <button class="btn btn-primary">שמור</button>
+        <small class="text-body-secondary">בלי שכונות מסומנות, החיפוש כולל את כל העיר.</small>
+      </div>
+    </div>
+  </div>
+  <script type="application/json" id="areas-data">{{ map_data | tojson }}</script>
+</form>
+<p class="small text-body-secondary mt-3 mb-0">גבולות השכונות: {{ city_map.source }}</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if city_map %}
+<script src="{{ url_for('static', path='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', path='areas.js') }}"></script>
+{% endif %}
+{% endblock %}

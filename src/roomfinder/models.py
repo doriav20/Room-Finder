@@ -45,6 +45,8 @@ class Listing(Base):
     house_number: Mapped[str | None] = mapped_column(String(16))
     latitude: Mapped[float | None]
     longitude: Mapped[float | None]
+    # The official neighborhood from the city's map (areas.py), when it can be told
+    area: Mapped[str | None] = mapped_column(String(64), index=True)
     is_agency: Mapped[bool | None]
     entry_date: Mapped[str | None] = mapped_column(String(64))
     images: Mapped[list[str]] = mapped_column(JSON, default=list)

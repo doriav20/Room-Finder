@@ -97,10 +97,54 @@ body {
   font-size: 0.85rem;
 }
 
-.neighborhood-list {
-  max-height: 16rem;
+/* Neighborhoods page */
+.areas-map-wrap {
+  position: relative;
+}
+
+.areas-map {
+  height: 70vh;
+  min-height: 380px;
+}
+
+.areas-map.areas-drawing {
+  cursor: crosshair;
+  touch-action: none !important;
+}
+
+.areas-draw {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+}
+
+.areas-draw.active {
+  background: var(--bs-warning);
+}
+
+.areas-map .leaflet-tooltip {
+  direction: rtl;
+}
+
+.areas-map .area-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #212529;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
+
+.areas-map .area-label::before {
+  display: none;
+}
+
+.area-list {
+  max-height: 50vh;
   overflow-y: auto;
-  columns: 2;
 }
 
 .qr svg {

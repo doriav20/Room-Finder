@@ -15,6 +15,7 @@ from roomfinder.web import novnc
 
 PAGES = [
     "/",
+    "/areas",
     "/?tab=all",
     "/listings/cards?offset=0",
     "/sources",
@@ -27,6 +28,7 @@ PAGES = [
     "/no-such-page",
 ]
 ACTIONS = [
+    "/areas",
     "/listings/1/status",
     "/listings/1/notes",
     "/listings/mark-seen",

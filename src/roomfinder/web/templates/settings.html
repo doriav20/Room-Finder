@@ -78,36 +78,13 @@
           <div class="col-12 small text-body-secondary">
             ריהוט וחניה נקראים מדף המודעה (לא במדלן). מודעה שעוד לא ידוע עליה לא נפסלת.
           </div>
-          {% if neighborhoods %}
-          <div class="col-md-6">
-            <details{% if criteria.neighborhoods_include %} open{% endif %}>
-              <summary>רק בשכונות האלה <span class="text-body-secondary small">(ריק = כל השכונות)</span></summary>
-              <div class="neighborhood-list mt-2">
-                {% for name in neighborhoods %}
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="neighborhoods_include" value="{{ name }}" id="ni-{{ loop.index }}"
-                         {% if name in criteria.neighborhoods_include %}checked{% endif %}>
-                  <label class="form-check-label" for="ni-{{ loop.index }}">{{ name }}</label>
-                </div>
-                {% endfor %}
-              </div>
-            </details>
+          <div class="col-12">
+            <div class="form-label mb-1">שכונות</div>
+            <div>
+              📍 {{ areas_summary }}{% if criteria.areas|length > 1 %}: <span class="text-body-secondary">{{ criteria.areas | join(', ') }}</span>{% endif %}
+              {% if has_area_map %}· <a href="/areas">בחירה על המפה</a>{% else %}<span class="text-body-secondary small">(אין עדיין מפת שכונות לעיר הזו)</span>{% endif %}
+            </div>
           </div>
-          <div class="col-md-6">
-            <details{% if criteria.neighborhoods_exclude %} open{% endif %}>
-              <summary>בלי השכונות האלה</summary>
-              <div class="neighborhood-list mt-2">
-                {% for name in neighborhoods %}
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="neighborhoods_exclude" value="{{ name }}" id="ne-{{ loop.index }}"
-                         {% if name in criteria.neighborhoods_exclude %}checked{% endif %}>
-                  <label class="form-check-label" for="ne-{{ loop.index }}">{{ name }}</label>
-                </div>
-                {% endfor %}
-              </div>
-            </details>
-          </div>
-          {% endif %}
           <div class="col-12">
             <label class="form-label" for="exclude_keywords">מילים שפוסלות מודעה <span class="text-body-secondary small">(שורה לכל ביטוי, מילים שלמות)</span></label>
             <textarea id="exclude_keywords" name="exclude_keywords" rows="3" class="form-control">{{ criteria.exclude_keywords | join('\n') }}</textarea>

@@ -18,8 +18,10 @@ from roomfinder.config import Settings, get_settings
 from roomfinder.db import create_engine, create_sessionmaker
 from roomfinder.notify import LogNotifier, Notifier
 from roomfinder.notify.telegram import TelegramService
+from roomfinder.pipeline import refresh_areas
 from roomfinder.runner import SourceRunner
 from roomfinder.scheduler import Scheduler
+from roomfinder.settings_store import get_criteria
 from roomfinder.sources import build_sources
 from roomfinder.web.accounts import account_router, admin_router, public_router
 from roomfinder.web.novnc import add_novnc
@@ -106,6 +108,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.telegram = telegram
 
         await runner.close_interrupted_runs()
+        async with sessionmaker() as session:
+            if moved := await refresh_areas(session, await get_criteria(session)):
+                log.info("Placed %d listings in neighborhoods", moved)
+            await session.commit()
         if settings.scheduler_enabled:
             scheduler.start()
         try:

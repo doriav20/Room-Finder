@@ -4,7 +4,13 @@ from sqlalchemy import select
 
 from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, PriceChange
-from roomfinder.pipeline import REMOVAL_GRACE, apply_details, ingest, mark_removed
+from roomfinder.pipeline import (
+    REMOVAL_GRACE,
+    apply_details,
+    ingest,
+    mark_removed,
+    refresh_areas,
+)
 from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 
 CRITERIA = SearchCriteria()
@@ -256,3 +262,42 @@ async def test_repeated_items_in_one_run_are_ingested_once(session):
 
     assert outcome.inserted == 1
     assert len(outcome.to_notify) == 1
+
+
+async def test_listings_are_placed_in_their_neighborhood(session):
+    await ingest(
+        session, "yad2", [item("a1", neighborhood="רמבם")], CRITERIA, baseline=True, now=utcnow()
+    )
+    listing = await get_listing(session, "a1")
+    assert listing.area == 'רמב"ם'
+
+    await ingest(
+        session, "yad2", [item("a1", neighborhood="נוה ים")], CRITERIA, baseline=False, now=utcnow()
+    )
+    assert listing.area == "נווה ים"
+
+
+async def test_listings_outside_the_chosen_neighborhoods_are_not_notified(session):
+    criteria = SearchCriteria(areas=["רמז"])
+    items = [item("a1"), item("a2", neighborhood="נווה ים", street="ביאליק")]
+
+    outcome = await ingest(session, "yad2", items, criteria, baseline=False, now=utcnow())
+
+    assert [listing.source_id for listing in outcome.to_notify] == ["a1"]
+    assert (await get_listing(session, "a2")).matches is False
+
+
+async def test_refresh_places_stored_listings_and_judges_them_again(session):
+    now = utcnow()
+    listing = Listing(
+        source="komo", source_id="k1", url="https://example.com/k1", city="ראשון לציון",
+        rooms=4.0, price=6000, property_type="apartment", neighborhood="נווה ים",
+        images=[], features=[], first_seen_at=now, last_seen_at=now, matches=True,
+    )  # fmt: skip
+    session.add(listing)
+    await session.flush()
+    criteria = SearchCriteria(areas=["רמז"])
+
+    assert await refresh_areas(session, criteria) == 1
+    assert (listing.area, listing.matches) == ("נווה ים", False)
+    assert await refresh_areas(session, criteria) == 0

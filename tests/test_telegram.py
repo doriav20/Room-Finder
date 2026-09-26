@@ -140,6 +140,22 @@ def test_message_shows_furniture_and_parking_when_known():
     assert "🛋 מרוהטת חלקית · 🚗 אין חניה" in format_new_listing(partial, "יד2").splitlines()
 
 
+def test_message_names_the_neighborhood_on_the_map_when_the_site_says_otherwise():
+    text = format_new_listing(
+        make_listing(city="ראשון לציון", neighborhood='רמב"ם', area="אברמוביץ'"), "יד2"
+    )
+    same = format_new_listing(
+        make_listing(city="ראשון לציון", neighborhood="רמבם", area='רמב"ם'), "יד2"
+    )
+    no_name = format_new_listing(
+        make_listing(neighborhood=None, street=None, house_number=None, area="רמז"), "יד2"
+    )
+
+    assert "📍 הרצל 12, רמב\"ם (לפי המפה: אברמוביץ')" in text
+    assert "לפי המפה" not in same
+    assert "📍 שכונת רמז" in no_name
+
+
 def test_message_escapes_html_and_handles_missing_values():
     listing = make_listing(
         price=None, sqm=None, floor=0, street="<b>", house_number=None, neighborhood=None

@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import timedelta
 
 from conftest import add_listing
@@ -231,3 +233,63 @@ def test_loading_more_cards(client, db):
 
     assert "טען עוד" in first_page
     assert more.count("listing-card") == 2
+
+
+def test_neighborhoods_page_shows_the_map_and_what_is_in_each(client, db):
+    add_listing(db, "a", area="רמז")
+    add_listing(db, "b", area="רמז", street="ביאליק")
+    add_listing(db, "c", area=None, neighborhood="מרכז", street="הגפן")
+
+    page = client.get("/areas").text
+
+    assert "vendor/leaflet/leaflet.js" in page
+    embedded = re.search(
+        r'<script type="application/json" id="areas-data">(.*?)</script>', page, re.S
+    )
+    counts = {area["name"]: area["count"] for area in json.loads(embedded.group(1))["areas"]}
+    assert len(counts) == 40 and counts["רמז"] == 2 and counts["נווה ים"] == 0
+    assert "(1 עכשיו)" in page  # the one that can't be placed
+
+
+def test_choosing_neighborhoods_saves_them_and_judges_listings_again(client, db):
+    inside = add_listing(db, "a", neighborhood="רמז", area="רמז")
+    outside = add_listing(db, "b", neighborhood="נווה ים", area="נווה ים", street="ביאליק")
+
+    response = client.post(
+        "/areas", data={"areas": ["רמז"], "unknown_area_ok": "1"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    db.expire_all()
+    assert db.get(Listing, inside.id).matches is True
+    assert db.get(Listing, outside.id).matches is False
+    saved = db.get(Setting, "criteria").value
+    assert (saved["areas"], saved["unknown_area_ok"]) == (["רמז"], True)
+    assert "השכונות נשמרו" in client.get("/areas?saved=1").text
+    assert "📍 שכונת רמז" in client.get("/settings").text
+    assert client.post("/areas", data={"areas": ["לא שכונה"]}).status_code == 400
+
+
+def test_saving_the_search_keeps_the_neighborhoods_of_the_same_city(client, db):
+    client.post("/areas", data={"areas": ["רמז", "נווה ים"]})
+    search = {"city": "ראשון לציון", "rooms_min": "4", "rooms_max": "4"}
+
+    client.post("/settings/criteria", data=search)
+    assert db.get(Setting, "criteria").value["areas"] == ["נווה ים", "רמז"]
+
+    client.post("/settings/criteria", data=search | {"city": "חולון"})
+    db.expire_all()
+    assert db.get(Setting, "criteria").value["areas"] == []
+    assert "אין עדיין מפת שכונות" in client.get("/areas").text
+
+
+def test_listings_filter_by_official_neighborhood(client, db):
+    add_listing(db, "a", area="רמז", price=5100)
+    add_listing(db, "b", neighborhood='רמב"ם', area="אברמוביץ'", price=5200, street="ביאליק")
+
+    page = client.get("/?tab=all").text
+    only_ramaz = client.get("/?tab=all&area=רמז").text
+
+    assert '<option value="אברמוביץ&#39;">' in page
+    assert "(לפי המפה: אברמוביץ&#39;)" in page  # placed by its map point, not the site's name
+    assert "5,100 ₪" in only_ramaz and "5,200 ₪" not in only_ramaz

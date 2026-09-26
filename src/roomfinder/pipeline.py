@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from roomfinder import areas
 from roomfinder.dedupe import find_duplicate
 from roomfinder.matching import listing_matches
 from roomfinder.models import Listing, ListingStatus, PriceChange
@@ -67,6 +68,7 @@ def _apply(listing: Listing, item: ListingData, now: datetime) -> None:
     if item.features:
         listing.features = list(item.features)
     listing.address_key = address_key(listing.street, listing.house_number)
+    listing.area = areas.locate(listing)
     listing.last_seen_at = now
     listing.removed_at = None
 
@@ -208,3 +210,24 @@ async def mark_removed(session: AsyncSession, source: str, now: datetime) -> int
         .values(removed_at=now)
     )
     return result.rowcount or 0
+
+
+async def rematch_all(session: AsyncSession, criteria: SearchCriteria) -> None:
+    """Judge every stored listing again, after the search changed."""
+    for listing in await session.scalars(select(Listing)):
+        listing.matches = listing_matches(listing, criteria)
+
+
+async def refresh_areas(session: AsyncSession, criteria: SearchCriteria) -> int:
+    """Place stored listings in neighborhoods again, e.g. after the neighborhood map changed.
+
+    Returns how many listings moved.
+    """
+    moved = 0
+    for listing in await session.scalars(select(Listing)):
+        area = areas.locate(listing)
+        if area != listing.area:
+            listing.area = area
+            listing.matches = listing_matches(listing, criteria)
+            moved += 1
+    return moved

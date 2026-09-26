@@ -29,7 +29,7 @@ from telegram.ext import (
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
-from roomfinder.labels import furniture_label, parking_label
+from roomfinder.labels import area_note, furniture_label, parking_label
 from roomfinder.models import (
     Listing,
     ListingStatus,
@@ -105,7 +105,10 @@ def _listing_details(listing: Listing) -> list[str]:
     if specs := [spec for spec in specs if spec]:
         lines.append(" · ".join(specs))
     street = " ".join(filter(None, [listing.street, listing.house_number]))
-    if place := ", ".join(filter(None, [street, listing.neighborhood])):
+    place = ", ".join(filter(None, [street, listing.neighborhood]))
+    if note := area_note(listing):
+        place = f"{place} (לפי המפה: {note})" if place else f"שכונת {note}"
+    if place:
         lines.append(f"📍 {e(place)}")
     kind = {True: "תיווך", False: "פרטי"}.get(listing.is_agency)
     property_label = (

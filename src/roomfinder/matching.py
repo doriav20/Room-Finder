@@ -2,7 +2,8 @@
 
 from typing import Protocol
 
-from roomfinder.normalize import contains_phrase, normalize_city, normalize_neighborhood
+from roomfinder import areas
+from roomfinder.normalize import contains_phrase, normalize_city
 from roomfinder.schemas import SearchCriteria
 
 
@@ -17,6 +18,8 @@ class ListingLike(Protocol):
     property_type: str | None
     city: str | None
     neighborhood: str | None
+    latitude: float | None
+    longitude: float | None
     is_agency: bool | None
     furnished: bool | None
     parking: bool | None
@@ -59,12 +62,13 @@ def mismatch_reasons(listing: ListingLike, criteria: SearchCriteria) -> list[str
     if criteria.parking_required and listing.parking is False:
         reasons.append("parking")
 
-    neighborhood = normalize_neighborhood(listing.neighborhood)
-    if neighborhood:
-        included = {normalize_neighborhood(n) for n in criteria.neighborhoods_include}
-        excluded = {normalize_neighborhood(n) for n in criteria.neighborhoods_exclude}
-        if (included and neighborhood not in included) or neighborhood in excluded:
-            reasons.append("neighborhood")
+    # Neighborhoods only mean something for the city whose map they come from
+    if criteria.areas and areas.city_map(criteria.city) is not None:
+        area = areas.locate(listing)
+        if (area is None and not criteria.unknown_area_ok) or (
+            area is not None and area not in criteria.areas
+        ):
+            reasons.append("area")
 
     text = " ".join(filter(None, [listing.title, listing.description]))
     if any(contains_phrase(text, keyword) for keyword in criteria.exclude_keywords):

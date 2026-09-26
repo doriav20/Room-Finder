@@ -94,8 +94,10 @@ class SearchCriteria(BaseModel):
     private_only: bool = False
     furnished: Literal["any", "yes", "no"] = "any"
     parking_required: bool = False
-    neighborhoods_include: list[str] = Field(default_factory=list)
-    neighborhoods_exclude: list[str] = Field(default_factory=list)
+    # Official neighborhoods from the city's map (see areas.py); empty means the whole city
+    areas: list[str] = Field(default_factory=list)
+    # Whether a listing that can't be placed in a neighborhood still fits
+    unknown_area_ok: bool = True
     # Matched as whole words, so "שותף" would not hit "חצר משותפת"
     exclude_keywords: list[str] = Field(
         default_factory=lambda: ["סאבלט", "שותף לדירה", "שותפה לדירה"]

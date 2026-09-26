@@ -78,15 +78,26 @@ def test_parking_requirement():
     assert listing_matches(make_listing(parking=None), criteria)
 
 
-def test_neighborhood_include_and_exclude_lists():
-    listing = make_listing(neighborhood="נחלת יהודה")
-    assert listing_matches(listing, SearchCriteria(neighborhoods_include=["נחלת יהודה"]))
-    assert mismatch_reasons(listing, SearchCriteria(neighborhoods_include=["רמז"])) == [
-        "neighborhood"
-    ]
-    assert mismatch_reasons(listing, SearchCriteria(neighborhoods_exclude=["נחלת  יהודה"])) == [
-        "neighborhood"
-    ]
+def test_chosen_neighborhoods():
+    criteria = SearchCriteria(areas=["רמז", "נווה ים"])
+
+    assert listing_matches(make_listing(neighborhood="רמז, מערב ותיק"), criteria)
+    assert mismatch_reasons(make_listing(neighborhood="רמבם"), criteria) == ["area"]
+    assert listing_matches(make_listing(neighborhood="רמבם"), SearchCriteria())
+
+
+def test_listings_that_cant_be_placed_fit_unless_turned_off():
+    listing = make_listing(neighborhood="מרכז")
+
+    assert listing_matches(listing, SearchCriteria(areas=["רמז"]))
+    strict = SearchCriteria(areas=["רמז"], unknown_area_ok=False)
+    assert mismatch_reasons(listing, strict) == ["area"]
+
+
+def test_neighborhoods_are_ignored_for_a_city_without_a_map():
+    criteria = SearchCriteria(city="חולון", areas=["רמז"], unknown_area_ok=False)
+
+    assert listing_matches(make_listing(city="חולון", neighborhood="נאות רחל"), criteria)
 
 
 def test_exclude_keywords_match_whole_words_only():

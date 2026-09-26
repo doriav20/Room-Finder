@@ -3,7 +3,7 @@
 import asyncio
 import csv
 import io
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import time, timedelta
 from pathlib import Path
@@ -17,9 +17,10 @@ from pydantic import ValidationError
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from roomfinder import areas
 from roomfinder.config import NOVNC_PAGE, Settings
 from roomfinder.db import utcnow
-from roomfinder.labels import furniture_label, parking_label
+from roomfinder.labels import area_note, furniture_label, parking_label
 from roomfinder.matching import listing_matches
 from roomfinder.models import (
     Listing,
@@ -29,7 +30,8 @@ from roomfinder.models import (
     SourceState,
     TelegramChat,
 )
-from roomfinder.normalize import CITY_ALIASES
+from roomfinder.normalize import CITY_ALIASES, normalize_city
+from roomfinder.pipeline import rematch_all
 from roomfinder.runner import get_source_state
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, SearchCriteria
 from roomfinder.settings_store import (
@@ -135,7 +137,7 @@ def _known_source(request: Request, name: str) -> str:
 class ListingFilters:
     tab: str = ""
     source: str = ""
-    neighborhood: str = ""
+    area: str = ""
     price_max: int | None = None
     # "yes" / "no" / "" - unlike the search criteria, these show known values only
     furnished: str = ""
@@ -152,7 +154,7 @@ class ListingFilters:
         return cls(
             tab=tab if tab in dict(TABS) else "",
             source=params.get("source", ""),
-            neighborhood=params.get("neighborhood", ""),
+            area=params.get("area", ""),
             price_max=int(price_max) if price_max.isdigit() else None,
             furnished=params.get("furnished", "")
             if params.get("furnished") in ("yes", "no")
@@ -166,7 +168,7 @@ class ListingFilters:
         values = {
             "tab": self.tab,
             "source": self.source,
-            "neighborhood": self.neighborhood,
+            "area": self.area,
             "price_max": self.price_max,
             "furnished": self.furnished,
             "parking": self.parking,
@@ -191,8 +193,8 @@ def _listings_query(filters: ListingFilters, tab: str) -> Select[tuple[Listing]]
         query = query.where(Listing.matches.is_(True))
     if filters.source:
         query = query.where(Listing.source == filters.source)
-    if filters.neighborhood:
-        query = query.where(Listing.neighborhood == filters.neighborhood)
+    if filters.area:
+        query = query.where(Listing.area == filters.area)
     if filters.price_max:
         query = query.where(or_(Listing.price.is_(None), Listing.price <= filters.price_max))
     if filters.furnished:
@@ -217,6 +219,7 @@ class Card:
     duplicates: list[Listing] = field(default_factory=list)
     # The previous price, when it dropped recently
     price_drop: int | None = None
+    area_note: str | None = None
 
 
 async def _cards(session: AsyncSession, listings: list[Listing]) -> list[Card]:
@@ -241,7 +244,13 @@ async def _cards(session: AsyncSession, listings: list[Listing]) -> list[Card]:
             else:
                 drops.pop(change.listing_id, None)
     return [
-        Card(listing, formatting.address(listing), duplicates[listing.id], drops.get(listing.id))
+        Card(
+            listing,
+            formatting.address(listing),
+            duplicates[listing.id],
+            drops.get(listing.id),
+            area_note(listing),
+        )
         for listing in listings
     ]
 
@@ -269,17 +278,24 @@ def _criteria_summary(criteria: SearchCriteria) -> str:
     parts = [criteria.city, room_text]
     if criteria.price_max:
         parts.append(f"עד {criteria.price_max:,} ₪")
+    if criteria.areas:
+        parts.append(_areas_summary(criteria))
     return " · ".join(parts)
 
 
-async def _known_neighborhoods(session: AsyncSession) -> list[str]:
-    rows = await session.execute(
-        select(Listing.neighborhood, func.count())
-        .where(Listing.neighborhood.is_not(None))
-        .group_by(Listing.neighborhood)
-        .order_by(func.count().desc())
+def _areas_summary(criteria: SearchCriteria) -> str:
+    if not criteria.areas:
+        return "כל העיר"
+    if len(criteria.areas) == 1:
+        return f"שכונת {criteria.areas[0]}"
+    return f"{len(criteria.areas)} שכונות"
+
+
+async def _known_areas(session: AsyncSession) -> list[str]:
+    rows = await session.scalars(
+        select(Listing.area).where(Listing.area.is_not(None)).group_by(Listing.area)
     )
-    return sorted(name for name, _ in rows)
+    return sorted(rows)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -298,7 +314,7 @@ async def listings_page(request: Request) -> HTMLResponse:
             "cards": cards,
             "next_offset": next_offset,
             "page_query": filters.query(tab=tab),
-            "neighborhoods": await _known_neighborhoods(session),
+            "areas": await _known_areas(session),
             "latest_id": await session.scalar(select(func.max(Listing.id))) or 0,
             "criteria_summary": _criteria_summary(await get_criteria(session)),
         }
@@ -400,7 +416,7 @@ async def export_csv(request: Request) -> Response:
     writer = csv.writer(buffer)
     writer.writerow(
         [
-            "אתר", "סטטוס", "מתאימה", "מחיר", "חדרים", "מ״ר", "קומה", "כתובת", "עיר",
+            "אתר", "סטטוס", "מתאימה", "מחיר", "חדרים", "מ״ר", "קומה", "כתובת", "שכונה (מפה)", "עיר",
             "פרטי/תיווך", "סוג נכס", "ריהוט", "חניה", "נמצאה", "נראתה לאחרונה", "הוסרה",
             "הערות", "תיאור", "קישור",
         ]
@@ -417,6 +433,7 @@ async def export_csv(request: Request) -> Response:
                     listing.sqm or "",
                     "" if listing.floor is None else listing.floor,
                     formatting.address(listing),
+                    listing.area or "",
                     listing.city or "",
                     {True: "תיווך", False: "פרטי"}.get(listing.is_agency, ""),
                     formatting.property_label(listing.property_type),
@@ -550,6 +567,86 @@ async def restart_browser(request: Request) -> RedirectResponse:
     return RedirectResponse("/sources", status_code=303)
 
 
+# --- neighborhoods -------------------------------------------------------------
+
+
+async def _area_counts(session: AsyncSession, criteria: SearchCriteria) -> tuple[Counter[str], int]:
+    """Current listings that fit everything but the neighborhoods, per neighborhood, and how
+    many of them can't be placed in one."""
+    anywhere = criteria.model_copy(update={"areas": []})
+    counts: Counter[str] = Counter()
+    unknown = 0
+    query = select(Listing).where(
+        Listing.removed_at.is_(None),
+        Listing.duplicate_of_id.is_(None),
+        Listing.status != ListingStatus.HIDDEN,
+    )
+    for listing in await session.scalars(query):
+        if not listing_matches(listing, anywhere):
+            continue
+        if listing.area:
+            counts[listing.area] += 1
+        else:
+            unknown += 1
+    return counts, unknown
+
+
+def _map_data(city_map: areas.CityMap, counts: Counter[str]) -> dict[str, Any]:
+    west, south, east, north = city_map.bounds
+    return {
+        "bounds": [[south, west], [north, east]],
+        "areas": [
+            {
+                "name": area.name,
+                "outline": [[lat, lon] for lon, lat in area.ring],
+                "label": list(area.label_point),
+                "count": counts[area.name],
+            }
+            for area in city_map.areas
+        ],
+    }
+
+
+@router.get("/areas", response_class=HTMLResponse)
+async def areas_page(request: Request, saved: str = "") -> HTMLResponse:
+    async with _sessionmaker(request)() as session:
+        criteria = await get_criteria(session)
+        city_map = areas.city_map(criteria.city)
+        counts, unknown = await _area_counts(session, criteria)
+        context = {
+            "active": "areas",
+            "saved": saved == "1",
+            "criteria": criteria,
+            "city_map": city_map,
+            "counts": counts,
+            "unknown_count": unknown,
+            "map_data": _map_data(city_map, counts) if city_map else None,
+        }
+        return await render_page(request, session, "areas.html", context)
+
+
+@router.post("/areas")
+async def save_areas(request: Request) -> RedirectResponse:
+    form = await request.form()
+    chosen = set(form.getlist("areas"))
+    async with _sessionmaker(request)() as session:
+        criteria = await get_criteria(session)
+        city_map = areas.city_map(criteria.city)
+        if city_map is None or not chosen <= city_map.names:
+            raise HTTPException(400, "Unknown neighborhood")
+        criteria = criteria.model_copy(
+            update={
+                # In the map's order, so the saved list reads the same every time
+                "areas": [area.name for area in city_map.areas if area.name in chosen],
+                "unknown_area_ok": form.get("unknown_area_ok") == "1",
+            }
+        )
+        await save_criteria(session, criteria)
+        await rematch_all(session, criteria)
+        await session.commit()
+    return RedirectResponse("/areas?saved=1", status_code=303)
+
+
 # --- settings ------------------------------------------------------------------
 
 SAVED_MESSAGES = {
@@ -561,15 +658,17 @@ SAVED_MESSAGES = {
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     async with _sessionmaker(request)() as session:
+        criteria = await get_criteria(session)
         context = {
             "active": "settings",
             "saved": SAVED_MESSAGES.get(saved),
-            "criteria": await get_criteria(session),
+            "criteria": criteria,
+            "areas_summary": _areas_summary(criteria),
+            "has_area_map": areas.city_map(criteria.city) is not None,
             "preferences": await get_preferences(session),
             "cities": list(CITY_ALIASES),
             "room_options": ROOM_OPTIONS,
             "property_types": [(kind.value, label) for kind, label in PROPERTY_TYPE_LABELS.items()],
-            "neighborhoods": await _known_neighborhoods(session),
         }
         return await render_page(request, session, "settings.html", context)
 
@@ -583,9 +682,14 @@ def _optional_int(value: Any) -> int | None:
 async def save_search_criteria(request: Request) -> RedirectResponse:
     form = await request.form()
     rooms = sorted([float(form.get("rooms_min", 4)), float(form.get("rooms_max", 4))])
+    city = str(form.get("city", ""))
+    async with _sessionmaker(request)() as session:
+        current = await get_criteria(session)
+    # The neighborhoods come from the map page, and belong to the city they were chosen in
+    same_city = normalize_city(city) == normalize_city(current.city)
     try:
         criteria = SearchCriteria(
-            city=str(form.get("city", "")),
+            city=city,
             rooms_min=rooms[0],
             rooms_max=rooms[1],
             price_min=_optional_int(form.get("price_min")),
@@ -595,8 +699,8 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
             private_only=form.get("private_only") == "1",
             furnished=str(form.get("furnished") or "any"),
             parking_required=form.get("parking_required") == "1",
-            neighborhoods_include=form.getlist("neighborhoods_include"),
-            neighborhoods_exclude=form.getlist("neighborhoods_exclude"),
+            areas=current.areas if same_city else [],
+            unknown_area_ok=current.unknown_area_ok,
             exclude_keywords=[
                 line.strip()
                 for line in str(form.get("exclude_keywords", "")).splitlines()
@@ -607,8 +711,7 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
         raise HTTPException(400, str(exc)) from exc
     async with _sessionmaker(request)() as session:
         await save_criteria(session, criteria)
-        for listing in await session.scalars(select(Listing)):
-            listing.matches = listing_matches(listing, criteria)
+        await rematch_all(session, criteria)
         await session.commit()
     return RedirectResponse("/settings?saved=criteria", status_code=303)
 
