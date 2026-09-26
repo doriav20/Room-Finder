@@ -110,6 +110,9 @@ def normalize_city(value: Any) -> str | None:
     for canonical, aliases in CITY_ALIASES.items():
         if lowered in aliases:
             return canonical
+        # Some sites add the neighborhood after the city: "ראשון לציון קרית חתני פרס נובל"
+        if any(lowered.startswith(f"{alias} ") for alias in aliases if len(alias) >= 6):
+            return canonical
     return text
 
 
