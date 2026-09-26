@@ -1,0 +1,59 @@
+{
+  "data": [
+    {
+      "search_option": "rent",
+      "property_type": "apartment",
+      "is_promoted": false,
+      "images": [
+        {"description": "", "thumbnail": "https://onmap.pro/images/1.thumbnail.webp", "gallery": "https://onmap.pro/images/1.gallery.webp", "full": "https://onmap.pro/images/1.full.webp"}
+      ],
+      "address": {
+        "en": {"city_name": "Rishon LeZion", "neighborhood": "Rishon LeZion", "street_name": "Zalman Shazar St.", "house_number": "29"},
+        "he": {"country_name": "ישראל", "city_name": "ראשון לציון", "neighborhood": "ראשון לציון", "street_name": "זלמן שז\"ר", "house_number": "29"},
+        "location": {"lat": 31.996295, "lon": 34.7402903}
+      },
+      "additional_info": {
+        "area": {"base": 107, "garden": null, "field": null},
+        "rooms": 4,
+        "parking": {"aboveground": "double", "underground": null},
+        "bathrooms": 2,
+        "floor": {"on_the": 1, "out_of": 5}
+      },
+      "price": 7000,
+      "currency": "ILS",
+      "id": "HkDBhvJNMx",
+      "search_date": "2026-09-26T09:20:27.622Z",
+      "created_at": "2026-07-11T07:09:51.218Z",
+      "slug": "apartment-for-rent-rishon-lezion-rishon-lezion-hkdbhvjnmx"
+    },
+    {
+      "search_option": "rent",
+      "property_type": "penthouse",
+      "images": [],
+      "address": {
+        "he": {"city_name": "ראשון לציון", "neighborhood": "נווה הדרים", "street_name": "השומר", "house_number": ""},
+        "location": {"lat": 31.95, "lon": 34.8}
+      },
+      "additional_info": {
+        "area": {"base": null},
+        "rooms": 4.5,
+        "parking": {"aboveground": null, "underground": null},
+        "floor": {"on_the": 0, "out_of": null}
+      },
+      "price": 0,
+      "id": "Abc123",
+      "created_at": "not a date",
+      "slug": "penthouse-for-rent-rishon-letsiyon-neve-hadarim-abc123"
+    },
+    {
+      "search_option": "rent-short",
+      "property_type": "apartment",
+      "address": {"he": {"city_name": "ראשון לציון"}},
+      "additional_info": {"rooms": 4},
+      "price": 500,
+      "id": "Short1"
+    },
+    {"search_option": "rent", "property_type": "apartment"}
+  ],
+  "meta": {}
+}
