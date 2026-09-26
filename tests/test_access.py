@@ -1,13 +1,17 @@
 """Nothing is shown and nothing happens without signing in; admins-only stays admins-only."""
 
 import re
+import socketserver
+import threading
 
 import pytest
+from sqlalchemy import delete
 from starlette.websockets import WebSocketDisconnect
 
 from conftest import PASSWORD, add_listing, add_user, sign_in
 from roomfinder.auth import SESSION_COOKIE
-from roomfinder.models import Listing, ListingStatus, Role, User
+from roomfinder.models import Listing, ListingStatus, Role, User, UserSession
+from roomfinder.web import novnc
 
 PAGES = [
     "/",
@@ -116,6 +120,56 @@ def test_the_browser_socket_needs_an_admin(anonymous, db):
     sign_in(anonymous, "noa")
     with pytest.raises(WebSocketDisconnect), anonymous.websocket_connect("/novnc/websockify"):
         pass
+
+
+class _EchoVnc(socketserver.BaseRequestHandler):
+    """Stands in for x11vnc: greets like a VNC server, then echoes what it gets."""
+
+    def handle(self):
+        self.request.sendall(b"RFB 003.008\n")
+        while data := self.request.recv(1024):
+            self.request.sendall(data)
+
+
+@pytest.fixture
+def vnc_server(monkeypatch):
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _EchoVnc)
+    server.daemon_threads = True
+    server.block_on_close = False
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(novnc, "VNC_SERVER", server.server_address)
+    yield
+    server.shutdown()
+    server.server_close()
+
+
+def test_admins_reach_the_browser_through_the_dashboard(client, vnc_server):
+    headers = {"Origin": "http://localhost:8000"}
+    with client.websocket_connect("/novnc/websockify", headers=headers) as browser:
+        assert browser.receive_bytes() == b"RFB 003.008\n"
+        browser.send_bytes(b"click")
+        assert browser.receive_bytes() == b"click"
+
+
+def test_the_browser_socket_refuses_other_sites(client, vnc_server):
+    headers = {"Origin": "https://evil.example"}
+    with (
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect("/novnc/websockify", headers=headers),
+    ):
+        pass
+
+
+def test_an_open_browser_view_closes_when_the_sign_in_ends(client, db, vnc_server, monkeypatch):
+    monkeypatch.setattr(novnc, "SESSION_RECHECK_SECONDS", 0.05)
+    with client.websocket_connect("/novnc/websockify") as browser:
+        assert browser.receive_bytes() == b"RFB 003.008\n"
+
+        db.execute(delete(UserSession))  # signed out everywhere, e.g. the account was disabled
+        db.commit()
+
+        with pytest.raises(WebSocketDisconnect):
+            browser.receive_bytes()
 
 
 # --- signing in ------------------------------------------------------------------

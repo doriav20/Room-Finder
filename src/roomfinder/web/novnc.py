@@ -17,21 +17,27 @@ from roomfinder.auth import SESSION_COOKIE, user_for_token
 
 NOVNC_DIR = Path("/usr/share/novnc")
 VNC_SERVER = ("127.0.0.1", 5900)
+# An open view is cut off this soon after its sign-in ends (sign-out, disabled, no longer admin)
+SESSION_RECHECK_SECONDS = 30
 
 router = APIRouter()
 
 
+async def _signed_in_admin(websocket: WebSocket, token: str | None) -> bool:
+    async with websocket.app.state.sessionmaker() as session:
+        user = await user_for_token(session, token)
+        await session.commit()
+    return user is not None and user.is_admin
+
+
 @router.websocket("/novnc/websockify")
 async def vnc_bridge(websocket: WebSocket) -> None:
-    app = websocket.app
     origin = websocket.headers.get("origin")
-    if origin and urlsplit(origin).hostname not in app.state.settings.allowed_hosts:
+    if origin and urlsplit(origin).hostname not in websocket.app.state.settings.allowed_hosts:
         await websocket.close(code=1008)
         return
-    async with app.state.sessionmaker() as session:
-        user = await user_for_token(session, websocket.cookies.get(SESSION_COOKIE))
-        await session.commit()
-    if user is None or not user.is_admin:
+    token = websocket.cookies.get(SESSION_COOKIE)
+    if not await _signed_in_admin(websocket, token):
         await websocket.close(code=1008)
         return
     try:
@@ -51,7 +57,17 @@ async def vnc_bridge(websocket: WebSocket) -> None:
         while data := await reader.read(65536):
             await websocket.send_bytes(data)
 
-    tasks = {asyncio.create_task(browser_to_vnc()), asyncio.create_task(vnc_to_browser())}
+    async def while_signed_in() -> None:
+        while True:
+            await asyncio.sleep(SESSION_RECHECK_SECONDS)
+            if not await _signed_in_admin(websocket, token):
+                return
+
+    tasks = {
+        asyncio.create_task(browser_to_vnc()),
+        asyncio.create_task(vnc_to_browser()),
+        asyncio.create_task(while_signed_in()),
+    }
     try:
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
