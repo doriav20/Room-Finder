@@ -1,0 +1,25 @@
+name: roomfinder
+
+services:
+  app:
+    build: .
+    image: roomfinder:latest
+    container_name: roomfinder
+    # A fixed hostname keeps Chrome's profile lock consistent across container re-creation
+    hostname: roomfinder
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Asia/Jerusalem
+    ports:
+      - "127.0.0.1:8000:8000" # dashboard
+      - "127.0.0.1:6080:6080" # noVNC - the container's browser, for solving captchas manually
+    volumes:
+      - roomfinder-data:/data
+    # Chrome needs more shared memory than Docker's 64MB default
+    shm_size: 1gb
+    restart: unless-stopped
+
+volumes:
+  roomfinder-data:

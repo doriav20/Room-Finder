@@ -1,0 +1,14 @@
+# Development overlay - live code from the host with auto reload:
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d --build
+services:
+  app:
+    volumes:
+      - .:/app
+    environment:
+      UVICORN_EXTRA_ARGS: --reload --reload-dir /app/src
+      # Bind mounts from a Windows drive don't deliver file change events
+      WATCHFILES_FORCE_POLLING: "true"
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Don't hit the real sites on every reload; trigger runs manually instead
+      SCHEDULER_ENABLED: "false"
+      LOG_LEVEL: DEBUG
