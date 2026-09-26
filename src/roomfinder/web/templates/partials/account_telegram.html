@@ -1,0 +1,39 @@
+{% if not telegram.configured %}
+<p class="mb-0">הבוט לא מוגדר (צריך <code>TELEGRAM_BOT_TOKEN</code> בקובץ <code>.env</code>).</p>
+{% else %}
+<p class="mb-2">הבוט: <a href="https://t.me/{{ telegram.username }}" target="_blank" rel="noopener" dir="ltr">@{{ telegram.username }}</a></p>
+<p class="small text-body-secondary">התראות על דירות חדשות מגיעות לכל מי שחיבר טלגרם לחשבון פעיל. הבוט לא עונה לאף אחד אחר.</p>
+
+{% if telegram.chats %}
+<ul class="list-group mb-3">
+  {% for chat in telegram.chats %}
+  <li class="list-group-item d-flex align-items-center gap-2">
+    <span>✈️ {{ chat.name }}</span>
+    <small class="text-body-secondary">מאז {{ chat.created_at | local_datetime }}</small>
+    <button class="btn btn-sm btn-outline-danger ms-auto" hx-post="/account/telegram/{{ chat.chat_id }}/remove"
+            hx-target="#telegram-body" hx-confirm="לנתק את הטלגרם הזה? ההתראות יפסיקו להגיע אליו.">נתק</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="alert alert-warning small">עוד לא חיברת טלגרם, ולכן לא יגיעו אליך התראות.</div>
+{% endif %}
+
+{% if link %}
+<div class="alert alert-info">
+  <div class="mb-2">פתח את הקישור בטלפון (או סרוק) ולחץ <strong>Start</strong>. תקף ל-{{ link_minutes }} דקות ולשימוש אחד:</div>
+  <div class="d-flex flex-wrap align-items-center gap-3">
+    <div class="qr bg-white p-2 rounded">{{ qr_svg | safe }}</div>
+    <a href="{{ link }}" target="_blank" rel="noopener" dir="ltr" class="text-break small">{{ link }}</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="d-flex flex-wrap gap-2">
+  <button class="btn btn-sm btn-primary" hx-post="/account/telegram/link" hx-target="#telegram-body">➕ חבר טלגרם</button>
+  {% if telegram.chats %}
+  <button class="btn btn-sm btn-outline-secondary" hx-post="/account/telegram/test" hx-target="#telegram-body">שלח הודעת בדיקה</button>
+  {% endif %}
+</div>
+{% if message %}<div class="small mt-2">{{ message }}</div>{% endif %}
+{% endif %}

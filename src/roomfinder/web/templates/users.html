@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}משתמשים · RoomFinder{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">משתמשים</h1>
+
+{% if notice %}<div class="alert {% if notice.startswith('✔') %}alert-success{% else %}alert-warning{% endif %}">{{ notice }}</div>{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr><th>משתמש</th><th>תפקיד</th><th>טלגרם</th><th>כניסה אחרונה</th><th></th></tr>
+          </thead>
+          <tbody>
+          {% for user in users %}
+            <tr class="{% if not user.is_active %}text-body-secondary{% endif %}">
+              <td>
+                <div class="fw-semibold">{{ user.username }}{% if user.id == current_user.id %} <span class="badge text-bg-light">אתה</span>{% endif %}</div>
+                {% if not user.is_active %}<span class="badge text-bg-secondary">מושבת</span>{% endif %}
+                <div class="small text-body-secondary">נוצר {{ user.created_at | local_datetime }}</div>
+              </td>
+              <td>{% if user.is_admin %}מנהל{% else %}משתמש{% endif %}</td>
+              <td class="small">
+                {% for chat in chats_by_account.get(user.id, []) %}<div>✈️ {{ chat.name }}</div>{% else %}—{% endfor %}
+              </td>
+              <td class="small">{{ user.last_login_at | ago if user.last_login_at else '—' }}</td>
+              <td class="text-nowrap">
+                {% if user.id != current_user.id %}
+                <div class="d-flex flex-wrap gap-1">
+                  <form method="post" action="/users/{{ user.id }}/role">
+                    <input type="hidden" name="role" value="{{ 'member' if user.is_admin else 'admin' }}">
+                    <button class="btn btn-sm btn-outline-secondary">{{ 'הפוך למשתמש' if user.is_admin else 'הפוך למנהל' }}</button>
+                  </form>
+                  <form method="post" action="/users/{{ user.id }}/active">
+                    <button class="btn btn-sm {{ 'btn-outline-warning' if user.is_active else 'btn-outline-success' }}">{{ 'השבת' if user.is_active else 'הפעל' }}</button>
+                  </form>
+                  {% if user.is_active %}
+                  <button class="btn btn-sm btn-outline-primary" hx-post="/users/{{ user.id }}/reset-link"
+                          hx-target="#link-result">קישור לאיפוס סיסמה</button>
+                  {% endif %}
+                  <form method="post" action="/users/{{ user.id }}/delete" data-name="{{ user.username }}"
+                        onsubmit="return confirm('למחוק את ' + this.dataset.name + ' לצמיתות?')">
+                    <button class="btn btn-sm btn-outline-danger">מחק</button>
+                  </form>
+                </div>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="link-result" class="mt-3"></div>
+
+    {% if unassigned_chats %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-body fw-semibold">חיבורי טלגרם בלי משתמש</div>
+      <ul class="list-group list-group-flush">
+        {% for chat in unassigned_chats %}
+        <li class="list-group-item d-flex align-items-center gap-2">
+          <span>✈️ {{ chat.name }}</span>
+          <small class="text-body-secondary">מאז {{ chat.created_at | local_datetime }}</small>
+          <form class="ms-auto" method="post" action="/users/telegram/{{ chat.chat_id }}/remove">
+            <button class="btn btn-sm btn-outline-danger">נתק</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="card-footer bg-body small text-body-secondary">חיבורים מלפני שהיו משתמשים. אפשר לנתק ולחבר מחדש מדף "החשבון שלי".</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-4 d-flex flex-column gap-4">
+    <form class="card shadow-sm" hx-post="/users/invites" hx-target="#invite-result">
+      <div class="card-header bg-body fw-semibold">➕ הזמנת משתמש</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label" for="note">למי (לא חובה)</label>
+          <input class="form-control" id="note" name="note" maxlength="128" placeholder="למשל: נועה">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="role">תפקיד</label>
+          <select class="form-select" id="role" name="role">
+            <option value="member">משתמש</option>
+            <option value="admin">מנהל (גם מנהל משתמשים)</option>
+          </select>
+        </div>
+        <button class="btn btn-primary">צור קישור הזמנה</button>
+        <div id="invite-result" class="mt-3"></div>
+      </div>
+    </form>
+
+    <div class="card shadow-sm">
+      <div class="card-header bg-body fw-semibold">הזמנות פתוחות</div>
+      <ul class="list-group list-group-flush">
+        {% for invite in invites %}
+        <li class="list-group-item small d-flex align-items-center gap-2">
+          <div>
+            {% if invite.kind == 'reset' %}🔑 איפוס סיסמה ל-{{ usernames.get(invite.user_id, '?') }}{% else %}✉️ {{ invite.note or 'הזמנה' }} ({{ 'מנהל' if invite.role == 'admin' else 'משתמש' }}){% endif %}
+            <div class="text-body-secondary">בתוקף עד {{ invite.expires_at | local_datetime }}</div>
+          </div>
+          <form class="ms-auto" method="post" action="/users/invites/{{ invite.id }}/revoke">
+            <button class="btn btn-sm btn-outline-danger">בטל</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="list-group-item small text-body-secondary">אין הזמנות פתוחות.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

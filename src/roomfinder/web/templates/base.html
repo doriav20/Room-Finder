@@ -18,15 +18,22 @@
         <li class="nav-item"><a class="nav-link{% if active == 'listings' %} active fw-semibold{% endif %}" href="/">מודעות</a></li>
         <li class="nav-item"><a class="nav-link{% if active == 'sources' %} active fw-semibold{% endif %}" href="/sources">מקורות</a></li>
         <li class="nav-item"><a class="nav-link{% if active == 'settings' %} active fw-semibold{% endif %}" href="/settings">הגדרות</a></li>
+        {% if current_user.is_admin %}
+        <li class="nav-item"><a class="nav-link{% if active == 'users' %} active fw-semibold{% endif %}" href="/users">משתמשים</a></li>
+        {% endif %}
       </ul>
       <div class="ms-auto d-flex gap-3 align-items-center small">
         <a href="/sources" class="text-decoration-none text-body-secondary" title="מצב המקורות">
           {% if header.failing %}⚠️ {{ header.failing }} מקורות בבעיה{% else %}🟢 המקורות תקינים{% endif %}
         </a>
-        <a href="/settings#telegram" class="text-decoration-none text-body-secondary" title="טלגרם">
-          {% if header.telegram_users %}✈️ טלגרם מחובר{% elif header.telegram_configured %}✈️ טלגרם לא מחובר{% else %}✈️ טלגרם כבוי{% endif %}
+        <a href="/account#telegram" class="text-decoration-none text-body-secondary" title="הטלגרם שלי">
+          {% if header.my_telegram %}✈️ טלגרם מחובר{% elif header.telegram_configured %}✈️ טלגרם לא מחובר{% else %}✈️ טלגרם כבוי{% endif %}
         </a>
         {% if header.paused %}<span class="badge text-bg-warning">🔕 התראות מושהות</span>{% endif %}
+        <a href="/account" class="text-decoration-none{% if active == 'account' %} fw-semibold{% endif %}" title="החשבון שלי">👤 {{ current_user.username }}</a>
+        <form method="post" action="/logout" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary">יציאה</button>
+        </form>
       </div>
     </div>
   </nav>

@@ -50,12 +50,14 @@
         </p>
         <p class="small text-body-secondary">
           כל האתרים נבדקים דרך Chrome שרץ בתוך הקונטיינר. אם אתר מציג בדיקת "אני לא רובוט",
-          אפשר לפתוח את הדפדפן, לפתור אותה בעצמך, ואז ללחוץ "בדוק עכשיו".
+          מנהל יכול לפתוח את הדפדפן, לפתור אותה בעצמו, ואז ללחוץ "בדוק עכשיו".
         </p>
-        <a class="btn btn-outline-primary btn-sm" href="{{ novnc_url }}" target="_blank" rel="noopener">🖥 פתח את הדפדפן של המערכת</a>
+        {% if current_user.is_admin %}
+        <a class="btn btn-outline-primary btn-sm" href="{{ novnc_page }}" target="_blank" rel="noopener">🖥 פתח את הדפדפן של המערכת</a>
         <form method="post" action="/browser/restart" class="d-inline">
           <button class="btn btn-outline-secondary btn-sm">↻ הפעל מחדש</button>
         </form>
+        {% endif %}
       </div>
     </div>
   </div>

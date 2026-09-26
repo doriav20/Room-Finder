@@ -1,16 +1,33 @@
 import pytest
+from argon2 import PasswordHasher
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from roomfinder import models  # noqa: F401 - registers the tables
-from roomfinder.db import Base, create_sessionmaker
+from roomfinder import (
+    auth,
+    models,  # noqa: F401 - registers the tables
+)
+from roomfinder.config import Settings
+from roomfinder.db import Base, create_sessionmaker, utcnow
+from roomfinder.main import create_app
+from roomfinder.models import Listing, ListingStatus, Role, User
+
+PASSWORD = "correct horse battery"
 
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch):
     """Tests must never talk to the real bot configured in the developer's .env."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+
+
+@pytest.fixture(autouse=True)
+def fast_password_hashing(monkeypatch):
+    # Real Argon2 settings are slow on purpose; tests only need the same behavior
+    monkeypatch.setattr(auth, "_hasher", PasswordHasher(time_cost=1, memory_cost=1024))
 
 
 @pytest.fixture
@@ -39,3 +56,93 @@ def sessionmaker(engine):
 async def session(sessionmaker):
     async with sessionmaker() as session:
         yield session
+
+
+# --- the whole app -------------------------------------------------------------------
+
+
+@pytest.fixture
+def db(database_path):
+    """A plain session on the app's database, for setting up and checking data."""
+    with Session(create_engine(f"sqlite:///{database_path}")) as session:
+        yield session
+
+
+def add_listing(db: Session, source_id: str, **overrides) -> Listing:
+    now = utcnow()
+    fields = {
+        "source": "yad2",
+        "source_id": source_id,
+        "url": f"https://www.yad2.co.il/realestate/item/{source_id}",
+        "price": 6000,
+        "rooms": 4.0,
+        "sqm": 95,
+        "floor": 2,
+        "street": "הרצל",
+        "house_number": "12",
+        "neighborhood": "רמז",
+        "city": "ראשון לציון",
+        "property_type": "apartment",
+        "is_agency": False,
+        "status": ListingStatus.SEEN,
+        "matches": True,
+        "images": [],
+        "features": ["חניה"],
+        "first_seen_at": now,
+        "last_seen_at": now,
+    } | overrides
+    listing = Listing(**fields)
+    db.add(listing)
+    db.commit()
+    return listing
+
+
+def add_user(
+    db: Session,
+    username: str = "admin",
+    role: Role = Role.ADMIN,
+    active: bool = True,
+    password: str = PASSWORD,
+) -> User:
+    user = User(
+        username=username,
+        username_key=username.casefold(),
+        password_hash=auth.hash_password(password),
+        role=role,
+        is_active=active,
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
+def sign_in(client: TestClient, username: str = "admin", password: str = PASSWORD) -> None:
+    response = client.post(
+        "/login", data={"username": username, "password": password}, follow_redirects=False
+    )
+    assert response.status_code == 303, response.text
+
+
+@pytest.fixture
+def anonymous(database_path):
+    """The dashboard, for a visitor who isn't signed in."""
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{database_path}",
+        scheduler_enabled=False,
+        cdp_url="http://127.0.0.1:1",
+        allowed_hosts=["testserver", "localhost"],
+    )
+    with TestClient(create_app(settings)) as client:
+        yield client
+
+
+@pytest.fixture
+def admin(db) -> User:
+    return add_user(db)
+
+
+@pytest.fixture
+def client(anonymous, admin):
+    """The dashboard, signed in as an admin."""
+    sign_in(anonymous)
+    return anonymous

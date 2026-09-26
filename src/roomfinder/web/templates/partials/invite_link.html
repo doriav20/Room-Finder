@@ -1,0 +1,18 @@
+<div class="alert alert-info mb-0">
+  <div class="mb-2">
+    {% if kind == 'reset' %}
+    קישור לאיפוס הסיסמה של <strong>{{ note }}</strong>. תקף ל-24 שעות ולשימוש אחד:
+    {% else %}
+    קישור הרשמה{% if note %} עבור <strong>{{ note }}</strong>{% endif %}. תקף ל-3 ימים ולשימוש אחד:
+    {% endif %}
+  </div>
+  <div class="d-flex flex-wrap align-items-center gap-3">
+    <div class="qr bg-white p-2 rounded">{{ qr_svg | safe }}</div>
+    <div class="flex-grow-1" style="min-width: 14rem">
+      <input class="form-control form-control-sm mb-2" dir="ltr" readonly value="{{ link }}" onclick="this.select()">
+      <button class="btn btn-sm btn-outline-primary" type="button" data-link="{{ link }}"
+              onclick="navigator.clipboard.writeText(this.dataset.link).then(() => this.textContent = '✔ הועתק')">העתק קישור</button>
+    </div>
+  </div>
+  <div class="small text-body-secondary mt-2">שלח את הקישור רק למי שהוא מיועד לו: מי שמחזיק אותו יכול לפתוח חשבון.</div>
+</div>

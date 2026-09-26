@@ -1,0 +1,22 @@
+{% extends "auth_base.html" %}
+{% block title %}כניסה · RoomFinder{% endblock %}
+{% block content %}
+<h2 class="h5 mb-3">כניסה</h2>
+<form method="post" action="/login">
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="mb-3">
+    <label class="form-label" for="username">שם משתמש</label>
+    <input class="form-control" id="username" name="username" value="{{ username or '' }}"
+           autocomplete="username" autocapitalize="none" required autofocus>
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="password">סיסמה</label>
+    <input class="form-control" id="password" name="password" type="password"
+           autocomplete="current-password" required>
+  </div>
+  <button class="btn btn-primary w-100">כניסה</button>
+</form>
+<p class="small text-body-secondary mt-3 mb-0">
+  אין הרשמה פתוחה: חשבון נפתח רק מקישור הזמנה של מנהל, וקישור לאיפוס סיסמה מקבלים ממנו.
+</p>
+{% endblock %}

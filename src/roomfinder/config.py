@@ -3,6 +3,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Where the dashboard serves noVNC (see web/novnc.py)
+NOVNC_PAGE = "/novnc/vnc.html?autoconnect=1&resize=scale&path=novnc/websockify"
+
 
 class Settings(BaseSettings):
     """Process configuration from environment variables (see .env.example)."""
@@ -16,10 +19,17 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     log_level: str = "INFO"
     timezone: str = "Asia/Jerusalem"
+    # The dashboard's address as users open it; used in links sent by Telegram and the CLI
     dashboard_url: str = "http://localhost:8000"
-    novnc_url: str = "http://localhost:6080/vnc.html?autoconnect=1&resize=scale"
     # The dashboard answers only to these host names (guards against DNS rebinding)
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
+    # Mark the sign-in cookie HTTPS-only; needed behind an HTTPS proxy that talks HTTP to us
+    cookie_secure: bool = False
+
+    @property
+    def novnc_url(self) -> str:
+        """The container's browser, inside the dashboard (admins only)."""
+        return self.dashboard_url.rstrip("/") + NOVNC_PAGE
 
     @property
     def sqlalchemy_url(self) -> str:

@@ -13,8 +13,8 @@ services:
     environment:
       TZ: Asia/Jerusalem
     ports:
-      - "127.0.0.1:8000:8000" # dashboard
-      - "127.0.0.1:6080:6080" # noVNC - the container's browser, for solving captchas manually
+      # The dashboard, the only way in (sign-in required; the container's browser is inside it)
+      - "127.0.0.1:8000:8000"
     volumes:
       - roomfinder-data:/data
     # Chrome needs more shared memory than Docker's 64MB default

@@ -1,0 +1,30 @@
+{% extends "auth_base.html" %}
+{% block title %}הרשמה · RoomFinder{% endblock %}
+{% block content %}
+<h2 class="h5 mb-1">פתיחת חשבון</h2>
+<p class="small text-body-secondary">
+  הוזמנת {% if role == 'admin' %}כ<strong>מנהל</strong>{% else %}כמשתמש{% endif %}{% if note %} ({{ note }}){% endif %}.
+  הקישור עובד פעם אחת.
+</p>
+<form method="post" action="/register">
+  <input type="hidden" name="token" value="{{ token }}">
+  <div class="mb-3">
+    <label class="form-label" for="username">שם משתמש</label>
+    <input class="form-control" id="username" name="username" value="{{ username or '' }}"
+           autocomplete="username" autocapitalize="none" minlength="3" maxlength="32" required autofocus>
+    <div class="form-text">3-32 תווים: אותיות, ספרות, נקודה, מקף או קו תחתון.</div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="password">סיסמה</label>
+    <input class="form-control" id="password" name="password" type="password"
+           autocomplete="new-password" minlength="10" required>
+    <div class="form-text">לפחות 10 תווים. משפט קצר שקל לזכור עובד מצוין.</div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="confirm">הסיסמה שוב</label>
+    <input class="form-control" id="confirm" name="confirm" type="password"
+           autocomplete="new-password" minlength="10" required>
+  </div>
+  <button class="btn btn-primary w-100">פתיחת חשבון</button>
+</form>
+{% endblock %}

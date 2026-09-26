@@ -10,15 +10,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-import segno
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from roomfinder.config import Settings
+from roomfinder.config import NOVNC_PAGE, Settings
 from roomfinder.db import utcnow
 from roomfinder.labels import furniture_label, parking_label
 from roomfinder.matching import listing_matches
@@ -31,7 +30,6 @@ from roomfinder.models import (
     TelegramChat,
 )
 from roomfinder.normalize import CITY_ALIASES
-from roomfinder.notify.telegram import PAIRING_TTL
 from roomfinder.runner import get_source_state
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, SearchCriteria
 from roomfinder.settings_store import (
@@ -43,8 +41,10 @@ from roomfinder.settings_store import (
 )
 from roomfinder.sources.base import SourceError
 from roomfinder.web import formatting
+from roomfinder.web.security import require_user
 
-router = APIRouter()
+# Every page here needs a signed-in user (see web/accounts.py for signing in)
+router = APIRouter(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 PAGE_SIZE = 48
@@ -88,25 +88,27 @@ def configure_templates(settings: Settings) -> None:
 # --- shared --------------------------------------------------------------------
 
 
-async def _render(
+async def render_page(
     request: Request, session: AsyncSession, name: str, context: dict[str, Any]
 ) -> HTMLResponse:
     """Render a full page, with the header status that every page shows."""
+    user = request.state.user
     states = list(await session.scalars(select(SourceState)))
     preferences = await get_preferences(session)
-    telegram_users = await session.scalar(select(func.count()).select_from(TelegramChat))
+    my_telegram = await session.scalar(
+        select(func.count()).select_from(TelegramChat).where(TelegramChat.account_id == user.id)
+    )
     header = {
         "failing": sum(1 for state in states if state.enabled and state.consecutive_failures),
         "paused": preferences.notifications_paused,
         "telegram_configured": request.app.state.telegram is not None,
-        "telegram_users": telegram_users,
+        "my_telegram": my_telegram,
     }
-    return templates.TemplateResponse(
-        request, name, {"header": header, "source_labels": _source_labels(request)} | context
-    )
+    base = {"header": header, "current_user": user, "source_labels": _source_labels(request)}
+    return templates.TemplateResponse(request, name, base | context)
 
 
-def _partial(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse:
+def render_partial(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse:
     return templates.TemplateResponse(
         request, name, {"source_labels": _source_labels(request)} | context
     )
@@ -300,7 +302,7 @@ async def listings_page(request: Request) -> HTMLResponse:
             "latest_id": await session.scalar(select(func.max(Listing.id))) or 0,
             "criteria_summary": _criteria_summary(await get_criteria(session)),
         }
-        return await _render(request, session, "listings.html", context)
+        return await render_page(request, session, "listings.html", context)
 
 
 @router.get("/listings/cards", response_class=HTMLResponse)
@@ -310,7 +312,7 @@ async def more_cards(request: Request, offset: int = 0) -> HTMLResponse:
     async with _sessionmaker(request)() as session:
         cards, next_offset = await _page_of_cards(session, filters, tab, max(offset, 0))
     context = {"cards": cards, "next_offset": next_offset, "page_query": filters.query(tab=tab)}
-    return _partial(request, "partials/listing_cards.html", context)
+    return render_partial(request, "partials/listing_cards.html", context)
 
 
 @router.post("/listings/{listing_id}/status", response_class=HTMLResponse)
@@ -326,7 +328,7 @@ async def set_listing_status(request: Request, listing_id: int) -> HTMLResponse:
         listing.status = ListingStatus.SEEN if listing.status == wanted else wanted
         await session.commit()
         [card] = await _cards(session, [listing])
-    return _partial(request, "partials/listing_card.html", {"card": card})
+    return render_partial(request, "partials/listing_card.html", {"card": card})
 
 
 @router.post("/listings/{listing_id}/notes")
@@ -380,6 +382,16 @@ async def listing_updates(request: Request, since_id: int = 0) -> JSONResponse:
     return JSONResponse({"latest_id": max(latest_id, since_id), "listings": items})
 
 
+def _spreadsheet_safe(*values: Any) -> list[Any]:
+    """Ad texts come from strangers: a cell starting with = + - @ would run as an Excel formula."""
+    return [
+        f"'{value}"
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r")
+        else value
+        for value in values
+    ]
+
+
 @router.get("/export.csv")
 async def export_csv(request: Request) -> Response:
     settings: Settings = request.app.state.settings
@@ -396,7 +408,7 @@ async def export_csv(request: Request) -> Response:
     async with _sessionmaker(request)() as session:
         for listing in await session.scalars(select(Listing).order_by(Listing.first_seen_at)):
             writer.writerow(
-                [
+                _spreadsheet_safe(
                     labels.get(listing.source, listing.source),
                     listing.status,
                     "כן" if listing.matches else "לא",
@@ -416,7 +428,7 @@ async def export_csv(request: Request) -> Response:
                     listing.notes or "",
                     listing.description or "",
                     listing.url,
-                ]
+                )
             )
     # The BOM makes Excel read the Hebrew correctly
     return Response(
@@ -468,7 +480,7 @@ async def _render_row(request: Request, name: str) -> HTMLResponse:
     async with _sessionmaker(request)() as session:
         row = await _source_row(request, session, name)
         await session.commit()
-    return _partial(request, "partials/source_row.html", {"row": row})
+    return render_partial(request, "partials/source_row.html", {"row": row})
 
 
 @router.get("/sources", response_class=HTMLResponse)
@@ -484,9 +496,9 @@ async def sources_page(request: Request) -> HTMLResponse:
             "rows": rows,
             "runs": runs,
             "browser_version": await request.app.state.browser.version(),
-            "novnc_url": request.app.state.settings.novnc_url,
+            "novnc_page": NOVNC_PAGE,
         }
-        return await _render(request, session, "sources.html", context)
+        return await render_page(request, session, "sources.html", context)
 
 
 @router.get("/sources/{name}/row", response_class=HTMLResponse)
@@ -546,19 +558,6 @@ SAVED_MESSAGES = {
 }
 
 
-async def _telegram_context(request: Request, session: AsyncSession) -> dict[str, Any]:
-    telegram = request.app.state.telegram
-    users = list(await session.scalars(select(TelegramChat).order_by(TelegramChat.created_at)))
-    return {
-        "telegram": {
-            "configured": telegram is not None,
-            "username": telegram.username if telegram else None,
-            "users": users,
-        },
-        "link_minutes": int(PAIRING_TTL.total_seconds() // 60),
-    }
-
-
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     async with _sessionmaker(request)() as session:
@@ -571,8 +570,8 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
             "room_options": ROOM_OPTIONS,
             "property_types": [(kind.value, label) for kind, label in PROPERTY_TYPE_LABELS.items()],
             "neighborhoods": await _known_neighborhoods(session),
-        } | await _telegram_context(request, session)
-        return await _render(request, session, "settings.html", context)
+        }
+        return await render_page(request, session, "settings.html", context)
 
 
 def _optional_int(value: Any) -> int | None:
@@ -637,35 +636,3 @@ async def save_notification_preferences(request: Request) -> RedirectResponse:
         await save_preferences(session, preferences)
         await session.commit()
     return RedirectResponse("/settings?saved=preferences", status_code=303)
-
-
-async def _render_telegram(request: Request, **extra: Any) -> HTMLResponse:
-    async with _sessionmaker(request)() as session:
-        context = await _telegram_context(request, session)
-    return _partial(request, "partials/telegram.html", context | extra)
-
-
-def _telegram(request: Request):
-    telegram = request.app.state.telegram
-    if telegram is None:
-        raise HTTPException(503, "Telegram is not configured")
-    return telegram
-
-
-@router.post("/telegram/link", response_class=HTMLResponse)
-async def telegram_link(request: Request) -> HTMLResponse:
-    link = _telegram(request).pairing_link()
-    qr_svg = segno.make(link, error="m").svg_inline(scale=4, border=1, omitsize=True)
-    return await _render_telegram(request, link=link, qr_svg=qr_svg)
-
-
-@router.post("/telegram/users/{chat_id}/remove", response_class=HTMLResponse)
-async def telegram_remove_user(request: Request, chat_id: int) -> HTMLResponse:
-    await _telegram(request).unpair(chat_id)
-    return await _render_telegram(request, message="המשתמש הוסר.")
-
-
-@router.post("/telegram/test", response_class=HTMLResponse)
-async def telegram_test(request: Request) -> HTMLResponse:
-    await _telegram(request).message("✅ הודעת בדיקה מהדשבורד של RoomFinder")
-    return await _render_telegram(request, message="✔ נשלחה הודעת בדיקה.")

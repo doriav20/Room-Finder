@@ -122,10 +122,11 @@
   </div>
 
   <div class="col-lg-5 d-flex flex-column gap-4">
-    <section class="card shadow-sm" id="telegram">
+    <section class="card shadow-sm">
       <div class="card-header bg-body fw-semibold">✈️ טלגרם</div>
-      <div class="card-body" id="telegram-body">
-        {% include "partials/telegram.html" %}
+      <div class="card-body">
+        <p class="mb-2">כל משתמש מחבר את הטלגרם שלו מדף <a href="/account#telegram">החשבון שלי</a>, וההתראות מגיעות לכל מי שמחובר.</p>
+        {% if current_user.is_admin %}<p class="mb-0 small text-body-secondary">את החיבורים של כולם אפשר לראות בדף <a href="/users">משתמשים</a>.</p>{% endif %}
       </div>
     </section>
 

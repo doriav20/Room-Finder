@@ -1,61 +1,8 @@
 from datetime import timedelta
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
-from roomfinder.config import Settings
+from conftest import add_listing
 from roomfinder.db import utcnow
-from roomfinder.main import create_app
 from roomfinder.models import Listing, ListingStatus, PriceChange, Setting
-
-
-@pytest.fixture
-def db(database_path):
-    with Session(create_engine(f"sqlite:///{database_path}")) as session:
-        yield session
-
-
-@pytest.fixture
-def client(database_path):
-    settings = Settings(
-        database_url=f"sqlite+aiosqlite:///{database_path}",
-        scheduler_enabled=False,
-        cdp_url="http://127.0.0.1:1",
-        allowed_hosts=["testserver", "localhost"],
-    )
-    with TestClient(create_app(settings)) as client:
-        yield client
-
-
-def add_listing(db: Session, source_id: str, **overrides) -> Listing:
-    now = utcnow()
-    fields = {
-        "source": "yad2",
-        "source_id": source_id,
-        "url": f"https://www.yad2.co.il/realestate/item/{source_id}",
-        "price": 6000,
-        "rooms": 4.0,
-        "sqm": 95,
-        "floor": 2,
-        "street": "הרצל",
-        "house_number": "12",
-        "neighborhood": "רמז",
-        "city": "ראשון לציון",
-        "property_type": "apartment",
-        "is_agency": False,
-        "status": ListingStatus.SEEN,
-        "matches": True,
-        "images": [],
-        "features": ["חניה"],
-        "first_seen_at": now,
-        "last_seen_at": now,
-    } | overrides
-    listing = Listing(**fields)
-    db.add(listing)
-    db.commit()
-    return listing
 
 
 def test_listings_page_opens_on_new_listings(client, db):
@@ -142,6 +89,14 @@ def test_csv_export(client, db):
     assert response.text.startswith("﻿אתר,")
     assert "יד2" in response.text and "מעניין" in response.text
     assert ",מרוהטת,2 חניות," in response.text
+
+
+def test_csv_export_neutralizes_formulas_from_ads(client, db):
+    add_listing(db, "a", description='=HYPERLINK("http://evil.example","לחץ")', notes="+1")
+
+    text = client.get("/export.csv").text
+
+    assert "'=HYPERLINK" in text and ",'+1," in text
 
 
 def test_furniture_and_parking_filters_and_chips(client, db):
@@ -234,8 +189,8 @@ def test_saving_preferences(client):
 
 
 def test_telegram_actions_need_a_bot(client):
-    assert "הבוט לא מוגדר" in client.get("/settings").text
-    assert client.post("/telegram/link").status_code == 503
+    assert "הבוט לא מוגדר" in client.get("/account").text
+    assert client.post("/account/telegram/link").status_code == 503
 
 
 def test_cross_site_writes_are_blocked(client, db):

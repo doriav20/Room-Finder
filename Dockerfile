@@ -16,10 +16,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_LINK_MODE=copy \
     PATH=/opt/venv/bin:$PATH
 
-# Virtual display, VNC bridge for watching the browser, process supervisor, Hebrew fonts
+# Virtual display, VNC server and noVNC's page for watching the browser, process supervisor,
+# Hebrew fonts
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        xvfb fluxbox x11vnc novnc websockify supervisor \
+        xvfb fluxbox x11vnc novnc supervisor \
         culmus tzdata curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -40,7 +41,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen
 
-EXPOSE 8000 6080
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/health || exit 1

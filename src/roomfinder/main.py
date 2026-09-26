@@ -6,12 +6,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from roomfinder import __version__
+from roomfinder.auth import LoginThrottle
 from roomfinder.browser import BrowserManager
 from roomfinder.config import Settings, get_settings
 from roomfinder.db import create_engine, create_sessionmaker
@@ -20,12 +21,20 @@ from roomfinder.notify.telegram import TelegramService
 from roomfinder.runner import SourceRunner
 from roomfinder.scheduler import Scheduler
 from roomfinder.sources import build_sources
+from roomfinder.web.accounts import account_router, admin_router, public_router
+from roomfinder.web.novnc import add_novnc
 from roomfinder.web.routes import configure_templates
 from roomfinder.web.routes import router as web_router
+from roomfinder.web.security import LoginRequired, current_user, login_required_response
 
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "web" / "static"
+# Everything else needs a signed-in user
+PUBLIC_PATHS = frozenset({"/login", "/logout", "/register", "/reset", "/health"})
+PUBLIC_PREFIXES = ("/static/",)
+# And these need an admin (noVNC and /browser control the container's browser)
+ADMIN_PREFIXES = ("/novnc", "/users", "/browser")
 
 
 class RedactSecrets(logging.Filter):
@@ -112,9 +121,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await browser.stop()
             await engine.dispose()
 
-    app = FastAPI(title="RoomFinder", version=__version__, lifespan=lifespan)
+    # No generated API docs: they would list every endpoint to anyone
+    app = FastAPI(
+        title="RoomFinder",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.background_tasks = set()
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+    app.state.login_throttle = LoginThrottle()
+    app.add_exception_handler(LoginRequired, login_required_response)
+
+    # Middleware added later runs first: host check, headers, cross-site check, sign-in check
+
+    @app.middleware("http")
+    async def require_sign_in(request: Request, call_next):
+        # Deny by default: a visitor who isn't signed in gets only the sign-in pages, even for
+        # paths that don't exist, so nothing (not even which pages exist) is revealed
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+            return await call_next(request)
+        user = await current_user(request)
+        if user is None:
+            return login_required_response(request, LoginRequired())
+        if path.startswith(ADMIN_PREFIXES) and not user.is_admin:
+            return PlainTextResponse("Admins only", status_code=403)
+        return await call_next(request)
 
     @app.middleware("http")
     async def reject_cross_site_writes(request: Request, call_next):
@@ -128,16 +162,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return PlainTextResponse("Cross-site request blocked", status_code=403)
         return await call_next(request)
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        # No framing (clickjacking), no guessing content types, no leaking invite links
+        # to other sites through the Referer header, and no caching of private pages
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
+        if not request.url.path.startswith(PUBLIC_PREFIXES):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    # The loopback names stay allowed for Docker's health check; DNS rebinding can't use them
+    hosts = list(dict.fromkeys([*settings.allowed_hosts, "localhost", "127.0.0.1"]))
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+
     @app.get("/health")
-    async def health() -> dict[str, object]:
-        return {
-            "status": "ok",
-            "browser_connected": app.state.browser.connected,
-            "telegram": app.state.telegram is not None,
-        }
+    async def health(request: Request) -> dict[str, str]:
+        # Only for Docker's check from inside the container; hidden from everyone else
+        if request.client is None or request.client.host not in ("127.0.0.1", "::1"):
+            raise HTTPException(404)
+        return {"status": "ok"}
 
     configure_templates(settings)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    add_novnc(app)
+    app.include_router(public_router)
+    app.include_router(account_router)
+    app.include_router(admin_router)
     app.include_router(web_router)
     return app
 

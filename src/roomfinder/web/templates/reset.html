@@ -1,0 +1,20 @@
+{% extends "auth_base.html" %}
+{% block title %}סיסמה חדשה · RoomFinder{% endblock %}
+{% block content %}
+<h2 class="h5 mb-1">סיסמה חדשה</h2>
+<p class="small text-body-secondary">לחשבון <strong>{{ username }}</strong>. אחרי השינוי כל המכשירים האחרים ינותקו.</p>
+<form method="post" action="/reset">
+  <input type="hidden" name="token" value="{{ token }}">
+  <div class="mb-3">
+    <label class="form-label" for="password">סיסמה חדשה</label>
+    <input class="form-control" id="password" name="password" type="password"
+           autocomplete="new-password" minlength="10" required autofocus>
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="confirm">הסיסמה שוב</label>
+    <input class="form-control" id="confirm" name="confirm" type="password"
+           autocomplete="new-password" minlength="10" required>
+  </div>
+  <button class="btn btn-primary w-100">שמירה וכניסה</button>
+</form>
+{% endblock %}
