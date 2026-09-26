@@ -115,6 +115,15 @@ def test_new_listing_message():
     ]
 
 
+def test_message_shows_furniture_and_parking_when_known():
+    furnished = make_listing(furnished=True, parking=True, parking_spaces=2)
+    partial = make_listing(furnished=True, furniture_details="ריהוט חלקי", parking=False)
+
+    assert "🛋 מרוהטת · 🚗 2 חניות" in format_new_listing(furnished, "יד2").splitlines()
+    assert '✨ ממ"ד' in format_new_listing(furnished, "יד2").splitlines()
+    assert "🛋 מרוהטת חלקית · 🚗 אין חניה" in format_new_listing(partial, "יד2").splitlines()
+
+
 def test_message_escapes_html_and_handles_missing_values():
     listing = make_listing(
         price=None, sqm=None, floor=0, street="<b>", house_number=None, neighborhood=None

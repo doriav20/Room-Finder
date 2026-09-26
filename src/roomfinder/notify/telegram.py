@@ -27,6 +27,7 @@ from telegram.ext import (
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
+from roomfinder.labels import furniture_label, parking_label
 from roomfinder.models import Listing, ListingStatus, Notification, SourceState, TelegramChat
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, PropertyType
 from roomfinder.settings_store import get_preferences, save_preferences
@@ -98,8 +99,18 @@ def _listing_details(listing: Listing) -> list[str]:
     )
     if tags := [tag for tag in (kind, property_label) if tag]:
         lines.append("🏷 " + " · ".join(tags))
-    if listing.features:
-        lines.append("✨ " + e(" · ".join(listing.features[:6])))
+    extras = []
+    if furniture := furniture_label(listing):
+        extras.append(f"🛋 {furniture}")
+    if parking := parking_label(listing):
+        extras.append(f"🚗 {parking}")
+    if extras:
+        lines.append(" · ".join(extras))
+    features = listing.features
+    if parking:  # already said above
+        features = [feature for feature in features if feature != "חניה"]
+    if features:
+        lines.append("✨ " + e(" · ".join(features[:6])))
     return lines
 
 

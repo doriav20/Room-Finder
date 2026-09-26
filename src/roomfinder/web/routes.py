@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
+from roomfinder.labels import furniture_label, parking_label
 from roomfinder.matching import listing_matches
 from roomfinder.models import (
     Listing,
@@ -80,6 +81,8 @@ def configure_templates(settings: Settings) -> None:
     filters["run_status"] = formatting.run_status
     filters["ago"] = formatting.time_ago
     filters["local_datetime"] = lambda moment: formatting.local_datetime(moment, settings.timezone)
+    filters["furniture_label"] = furniture_label
+    filters["parking_label"] = parking_label
 
 
 # --- shared --------------------------------------------------------------------
@@ -132,6 +135,9 @@ class ListingFilters:
     source: str = ""
     neighborhood: str = ""
     price_max: int | None = None
+    # "yes" / "no" / "" - unlike the search criteria, these show known values only
+    furnished: str = ""
+    parking: str = ""
     sort: str = "newest"
     all: bool = False
 
@@ -146,6 +152,10 @@ class ListingFilters:
             source=params.get("source", ""),
             neighborhood=params.get("neighborhood", ""),
             price_max=int(price_max) if price_max.isdigit() else None,
+            furnished=params.get("furnished", "")
+            if params.get("furnished") in ("yes", "no")
+            else "",
+            parking=params.get("parking", "") if params.get("parking") in ("yes", "no") else "",
             sort=sort if sort in {"newest", "price_asc", "price_desc"} else "newest",
             all=params.get("all") == "1",
         )
@@ -156,6 +166,8 @@ class ListingFilters:
             "source": self.source,
             "neighborhood": self.neighborhood,
             "price_max": self.price_max,
+            "furnished": self.furnished,
+            "parking": self.parking,
             "sort": self.sort if self.sort != "newest" else None,
             "all": "1" if self.all else None,
         } | overrides
@@ -181,6 +193,10 @@ def _listings_query(filters: ListingFilters, tab: str) -> Select[tuple[Listing]]
         query = query.where(Listing.neighborhood == filters.neighborhood)
     if filters.price_max:
         query = query.where(or_(Listing.price.is_(None), Listing.price <= filters.price_max))
+    if filters.furnished:
+        query = query.where(Listing.furnished.is_(filters.furnished == "yes"))
+    if filters.parking:
+        query = query.where(Listing.parking.is_(filters.parking == "yes"))
     return query
 
 
@@ -574,6 +590,8 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
             sqm_min=_optional_int(form.get("sqm_min")),
             property_types=form.getlist("property_types"),
             private_only=form.get("private_only") == "1",
+            furnished=str(form.get("furnished") or "any"),
+            parking_required=form.get("parking_required") == "1",
             neighborhoods_include=form.getlist("neighborhoods_include"),
             neighborhoods_exclude=form.getlist("neighborhoods_exclude"),
             exclude_keywords=[

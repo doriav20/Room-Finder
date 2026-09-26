@@ -28,8 +28,18 @@
     <div class="mt-2 d-flex flex-wrap gap-1">
       {% if l.is_agency is true %}<span class="chip">תיווך</span>{% elif l.is_agency is false %}<span class="chip chip-private">פרטי</span>{% endif %}
       {% if l.property_type %}<span class="chip">{{ l.property_type | property_label }}</span>{% endif %}
-      {% for feature in l.features[:6] %}<span class="chip chip-feature">{{ feature }}</span>{% endfor %}
+      {% set furniture = l | furniture_label %}{% set parking = l | parking_label %}
+      {% if furniture %}<span class="chip {{ 'chip-yes' if l.furnished else 'chip-no' }}" title="{{ l.furniture_details or '' }}">🛋 {{ furniture }}</span>{% endif %}
+      {% if parking %}<span class="chip {{ 'chip-yes' if l.parking else 'chip-no' }}">🚗 {{ parking }}</span>{% endif %}
+      {% for feature in l.features[:6] if not (parking and feature == 'חניה') %}<span class="chip chip-feature">{{ feature }}</span>{% endfor %}
     </div>
+    {% if l.description or l.furniture_details %}
+    <details class="small mt-2 listing-description">
+      <summary>תיאור המודעה</summary>
+      {% if l.description %}<p class="mb-1">{{ l.description }}</p>{% endif %}
+      {% if l.furniture_details %}<p class="mb-0"><strong>ריהוט:</strong> {{ l.furniture_details }}</p>{% endif %}
+    </details>
+    {% endif %}
     {% if card.duplicates %}
     <div class="small mt-2">🔁 גם ב:
       {% for dup in card.duplicates %}<a href="{{ dup.url }}" target="_blank" rel="noopener noreferrer">{{ source_labels.get(dup.source, dup.source) }}</a>{% if not loop.last %}, {% endif %}{% endfor %}

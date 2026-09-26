@@ -55,12 +55,28 @@
               {% endfor %}
             </div>
           </div>
-          <div class="col-12">
+          <div class="col-md-4">
+            <label class="form-label" for="furnished">ריהוט</label>
+            <select id="furnished" name="furnished" class="form-select">
+              <option value="any"{% if criteria.furnished == 'any' %} selected{% endif %}>לא משנה</option>
+              <option value="yes"{% if criteria.furnished == 'yes' %} selected{% endif %}>מרוהטת בלבד</option>
+              <option value="no"{% if criteria.furnished == 'no' %} selected{% endif %}>לא מרוהטת בלבד</option>
+            </select>
+          </div>
+          <div class="col-md-8 d-flex flex-column justify-content-end gap-1">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch" name="parking_required" value="1" id="parking_required"
+                     {% if criteria.parking_required %}checked{% endif %}>
+              <label class="form-check-label" for="parking_required">רק עם חניה</label>
+            </div>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" role="switch" name="private_only" value="1" id="private_only"
                      {% if criteria.private_only %}checked{% endif %}>
               <label class="form-check-label" for="private_only">ללא תיווך בלבד</label>
             </div>
+          </div>
+          <div class="col-12 small text-body-secondary">
+            ריהוט וחניה נקראים מדף המודעה (לא במדלן). מודעה שעוד לא ידוע עליה לא נפסלת.
           </div>
           {% if neighborhoods %}
           <div class="col-md-6">

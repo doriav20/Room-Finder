@@ -55,6 +55,22 @@
       <option value="price_desc"{% if filters.sort == 'price_desc' %} selected{% endif %}>מחיר: מהיקר</option>
     </select>
   </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-furnished">ריהוט</label>
+    <select id="f-furnished" name="furnished" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">הכול</option>
+      <option value="yes"{% if filters.furnished == 'yes' %} selected{% endif %}>מרוהטת</option>
+      <option value="no"{% if filters.furnished == 'no' %} selected{% endif %}>לא מרוהטת</option>
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-parking">חניה</label>
+    <select id="f-parking" name="parking" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">הכול</option>
+      <option value="yes"{% if filters.parking == 'yes' %} selected{% endif %}>עם חניה</option>
+      <option value="no"{% if filters.parking == 'no' %} selected{% endif %}>בלי חניה</option>
+    </select>
+  </div>
   <div class="col-12 col-md-3">
     <div class="form-check form-switch mb-1">
       <input class="form-check-input" type="checkbox" role="switch" id="f-all" name="all" value="1"
