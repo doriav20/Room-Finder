@@ -51,6 +51,7 @@ class ListingData(BaseModel):
     is_agency: bool | None = None
     entry_date: str | None = None
     images: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
     posted_at: datetime | None = None
     raw: dict[str, Any] | None = None
 

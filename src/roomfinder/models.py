@@ -48,6 +48,8 @@ class Listing(Base):
     is_agency: Mapped[bool | None]
     entry_date: Mapped[str | None] = mapped_column(String(64))
     images: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Amenity tags from the site, e.g. "חניה", "ממ"ד"
+    features: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

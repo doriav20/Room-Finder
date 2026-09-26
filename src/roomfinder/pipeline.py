@@ -60,6 +60,8 @@ def _apply(listing: Listing, item: ListingData, now: datetime) -> None:
             setattr(listing, name, value)
     if item.images:
         listing.images = list(item.images)
+    if item.features:
+        listing.features = list(item.features)
     listing.address_key = address_key(listing.street, listing.house_number)
     listing.last_seen_at = now
     listing.removed_at = None
@@ -73,7 +75,9 @@ async def _insert(
     now: datetime,
     outcome: IngestOutcome,
 ) -> None:
-    listing = Listing(source=item.source, source_id=item.source_id, first_seen_at=now, images=[])
+    listing = Listing(
+        source=item.source, source_id=item.source_id, first_seen_at=now, images=[], features=[]
+    )
     _apply(listing, item, now)
     listing.matches = listing_matches(listing, criteria)
     session.add(listing)
