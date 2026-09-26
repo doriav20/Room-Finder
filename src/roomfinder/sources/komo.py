@@ -136,7 +136,8 @@ class KomoSource(Source):
             if response is not None and response.status >= 400:
                 raise SourceError(f"Komo answered {response.status}")
             found, has_next = parse_page(await page.content())
-            listings.update((listing.source_id, listing) for listing in found)
-            if not has_next or not found:
+            new = [listing for listing in found if listing.source_id not in listings]
+            listings.update((listing.source_id, listing) for listing in new)
+            if not has_next or not new:
                 return FetchResult(list(listings.values()), complete=True)
         return FetchResult(list(listings.values()), complete=False)
