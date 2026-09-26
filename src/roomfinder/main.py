@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Iterable
@@ -102,6 +103,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await scheduler.stop()
+            # Checks started from the dashboard, cut off before the browser goes away
+            for task in app.state.background_tasks:
+                task.cancel()
+            await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
             if telegram is not None:
                 await telegram.stop()
             await browser.stop()
