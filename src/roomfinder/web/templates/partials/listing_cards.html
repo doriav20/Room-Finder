@@ -1,0 +1,10 @@
+{% for card in cards %}
+<div class="col">{% include "partials/listing_card.html" %}</div>
+{% endfor %}
+{% if next_offset is not none %}
+<div class="col-12 text-center" id="load-more">
+  <button class="btn btn-outline-primary"
+          hx-get="/listings/cards?{{ page_query }}&offset={{ next_offset }}"
+          hx-target="#load-more" hx-swap="outerHTML">טען עוד</button>
+</div>
+{% endif %}

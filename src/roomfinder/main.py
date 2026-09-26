@@ -2,20 +2,29 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from roomfinder import __version__
 from roomfinder.browser import BrowserManager
 from roomfinder.config import Settings, get_settings
 from roomfinder.db import create_engine, create_sessionmaker
 from roomfinder.notify import LogNotifier, Notifier
-from roomfinder.notify.telegram import PAIRING_TTL, TelegramService
+from roomfinder.notify.telegram import TelegramService
 from roomfinder.runner import SourceRunner
 from roomfinder.scheduler import Scheduler
 from roomfinder.sources import build_sources
+from roomfinder.web.routes import configure_templates
+from roomfinder.web.routes import router as web_router
 
 log = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent / "web" / "static"
 
 
 class RedactSecrets(logging.Filter):
@@ -98,6 +107,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await engine.dispose()
 
     app = FastAPI(title="RoomFinder", version=__version__, lifespan=lifespan)
+    app.state.background_tasks = set()
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
+    @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next):
+        # Another site open in the browser must not be able to change anything here
+        origin = request.headers.get("origin")
+        if (
+            request.method not in ("GET", "HEAD", "OPTIONS")
+            and origin
+            and urlsplit(origin).hostname not in settings.allowed_hosts
+        ):
+            return PlainTextResponse("Cross-site request blocked", status_code=403)
+        return await call_next(request)
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -107,16 +130,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "telegram": app.state.telegram is not None,
         }
 
-    @app.post("/telegram/pairing-link")
-    async def telegram_pairing_link() -> dict[str, object]:
-        """A one-time t.me link that makes the chat opening it the bot's only owner."""
-        if app.state.telegram is None:
-            raise HTTPException(503, "Telegram is not configured")
-        return {
-            "link": app.state.telegram.pairing_link(),
-            "expires_in_minutes": int(PAIRING_TTL.total_seconds() // 60),
-        }
-
+    configure_templates(settings)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.include_router(web_router)
     return app
 
 

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}מקורות · RoomFinder{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">מקורות</h1>
+
+<div class="card shadow-sm mb-4">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>אתר</th><th>מצב</th><th>בדיקה אחרונה</th><th>תוצאות</th><th>כל כמה דקות</th><th></th>
+        </tr>
+      </thead>
+      {% for row in rows %}{% include "partials/source_row.html" %}{% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-body fw-semibold">בדיקות אחרונות</div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 small">
+          <thead class="table-light"><tr><th>זמן</th><th>אתר</th><th>תוצאה</th><th>נמצאו</th><th>חדשות</th><th>פרטים</th></tr></thead>
+          <tbody>
+          {% for run in runs %}
+            <tr>
+              <td class="text-nowrap" title="{{ run.started_at | local_datetime }}">{{ run.started_at | ago }}</td>
+              <td>{{ source_labels.get(run.source, run.source) }}</td>
+              <td>{{ run.status | run_status }}{% if run.baseline %} <span class="badge text-bg-info">ריצת בסיס</span>{% endif %}</td>
+              <td>{{ run.found }}</td>
+              <td>{{ run.new }}</td>
+              <td class="text-truncate" style="max-width: 22rem" title="{{ run.error or '' }}">{{ run.error or '' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-center text-body-secondary py-3">עוד לא בוצעו בדיקות</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-body fw-semibold">הדפדפן של המערכת</div>
+      <div class="card-body">
+        <p class="mb-2">
+          {% if browser_version %}🟢 מחובר · Chrome {{ browser_version }}{% else %}🔴 לא מחובר{% endif %}
+        </p>
+        <p class="small text-body-secondary">
+          כל האתרים נבדקים דרך Chrome שרץ בתוך הקונטיינר. אם אתר מציג בדיקת "אני לא רובוט",
+          אפשר לפתוח את הדפדפן, לפתור אותה בעצמך, ואז ללחוץ "בדוק עכשיו".
+        </p>
+        <a class="btn btn-outline-primary btn-sm" href="{{ novnc_url }}" target="_blank" rel="noopener">🖥 פתח את הדפדפן של המערכת</a>
+        <form method="post" action="/browser/restart" class="d-inline">
+          <button class="btn btn-outline-secondary btn-sm">↻ הפעל מחדש</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+<tbody id="source-{{ row.name }}"
+    {% if row.running %}hx-get="/sources/{{ row.name }}/row" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+<tr>
+  <td>
+    <div class="fw-semibold">{{ row.label }}</div>
+    <a class="small" href="{{ row.search_url }}" target="_blank" rel="noopener noreferrer">החיפוש באתר ↗</a>
+  </td>
+  <td>
+    {% if row.running %}<span class="spinner-border spinner-border-sm text-primary"></span> בודק…
+    {% elif not row.state.enabled %}⏸ כבוי
+    {% elif row.state.last_run_at is none %}⏳ עוד לא נבדק
+    {% elif row.state.consecutive_failures %}<span class="text-danger">⚠️ {{ row.state.consecutive_failures }} כשלונות ברצף</span>
+    {% else %}✅ תקין{% endif %}
+    {% if row.state.last_error %}<div class="small text-danger text-truncate" style="max-width: 16rem" title="{{ row.state.last_error }}">{{ row.state.last_error }}</div>{% endif %}
+  </td>
+  <td class="small">
+    {% if row.state.last_run_at %}
+    <div title="{{ row.state.last_run_at | local_datetime }}">{{ row.state.last_run_at | ago }}</div>
+    {% if row.state.last_success_at and row.state.last_success_at != row.state.last_run_at %}
+    <div class="text-body-secondary">הצלחה אחרונה: {{ row.state.last_success_at | ago }}</div>
+    {% endif %}
+    {% else %}—{% endif %}
+  </td>
+  <td class="small">{{ row.active }} פעילות<br><span class="text-body-secondary">{{ row.matching }} מתאימות</span></td>
+  <td style="max-width: 9rem">
+    <form hx-post="/sources/{{ row.name }}/settings" hx-target="#source-{{ row.name }}" hx-swap="outerHTML" hx-trigger="change">
+      <input type="number" name="interval_minutes" min="5" max="240" class="form-control form-control-sm"
+             value="{{ row.state.interval_minutes or '' }}" placeholder="{{ row.default_interval }}">
+      <input type="hidden" name="custom_url" value="{{ row.state.custom_url or '' }}">
+    </form>
+  </td>
+  <td class="text-nowrap">
+    <button class="btn btn-sm btn-primary" hx-post="/sources/{{ row.name }}/run"
+            hx-target="#source-{{ row.name }}" hx-swap="outerHTML"{% if row.running %} disabled{% endif %}>בדוק עכשיו</button>
+    <button class="btn btn-sm btn-outline-secondary" hx-post="/sources/{{ row.name }}/toggle"
+            hx-target="#source-{{ row.name }}" hx-swap="outerHTML">{% if row.state.enabled %}כבה{% else %}הפעל{% endif %}</button>
+  </td>
+</tr>
+<tr class="small">
+  <td colspan="6" class="pt-0 border-top-0">
+    <details{% if row.state.custom_url %} open{% endif %}>
+      <summary class="text-body-secondary">כתובת חיפוש מותאמת (לא חובה)</summary>
+      <form class="d-flex gap-2 mt-2" hx-post="/sources/{{ row.name }}/settings" hx-target="#source-{{ row.name }}" hx-swap="outerHTML">
+        <input type="hidden" name="interval_minutes" value="{{ row.state.interval_minutes or '' }}">
+        <input type="url" name="custom_url" class="form-control form-control-sm" dir="ltr"
+               value="{{ row.state.custom_url or '' }}" placeholder="הדבק כאן חיפוש מהאתר, או השאר ריק כדי להשתמש בהגדרות">
+        <button class="btn btn-sm btn-outline-primary">שמור</button>
+      </form>
+    </details>
+  </td>
+</tr>
+</tbody>

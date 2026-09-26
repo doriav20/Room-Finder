@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Jerusalem"
     dashboard_url: str = "http://localhost:8000"
     novnc_url: str = "http://localhost:6080/vnc.html?autoconnect=1&resize=scale"
+    # The dashboard answers only to these host names (guards against DNS rebinding)
+    allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
 
     @property
     def sqlalchemy_url(self) -> str:

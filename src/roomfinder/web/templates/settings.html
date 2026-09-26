@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}הגדרות · RoomFinder{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">הגדרות</h1>
+
+{% if saved %}
+<div class="alert alert-success">✔ {{ saved }}</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <form class="card shadow-sm" method="post" action="/settings/criteria">
+      <div class="card-header bg-body fw-semibold">🔎 מה מחפשים</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label" for="city">עיר</label>
+            <select id="city" name="city" class="form-select">
+              {% for city in cities %}<option{% if criteria.city == city %} selected{% endif %}>{{ city }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label" for="rooms_min">חדרים - מ-</label>
+            <select id="rooms_min" name="rooms_min" class="form-select">
+              {% for value in room_options %}<option value="{{ value }}"{% if criteria.rooms_min == value %} selected{% endif %}>{{ value | rooms }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label" for="rooms_max">עד</label>
+            <select id="rooms_max" name="rooms_max" class="form-select">
+              {% for value in room_options %}<option value="{{ value }}"{% if criteria.rooms_max == value %} selected{% endif %}>{{ value | rooms }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label" for="price_min">מחיר מינימלי</label>
+            <input id="price_min" name="price_min" type="number" min="0" step="100" class="form-control" value="{{ criteria.price_min or '' }}" placeholder="ללא">
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label" for="price_max">מחיר מקסימלי</label>
+            <input id="price_max" name="price_max" type="number" min="0" step="100" class="form-control" value="{{ criteria.price_max or '' }}" placeholder="ללא">
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label" for="sqm_min">מ״ר מינימלי</label>
+            <input id="sqm_min" name="sqm_min" type="number" min="0" step="5" class="form-control" value="{{ criteria.sqm_min or '' }}" placeholder="ללא">
+          </div>
+          <div class="col-12">
+            <div class="form-label">סוגי נכס</div>
+            <div class="d-flex flex-wrap gap-3">
+              {% for value, label in property_types %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="property_types" value="{{ value }}" id="pt-{{ value }}"
+                       {% if value in criteria.property_types %}checked{% endif %}>
+                <label class="form-check-label" for="pt-{{ value }}">{{ label }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch" name="private_only" value="1" id="private_only"
+                     {% if criteria.private_only %}checked{% endif %}>
+              <label class="form-check-label" for="private_only">ללא תיווך בלבד</label>
+            </div>
+          </div>
+          {% if neighborhoods %}
+          <div class="col-md-6">
+            <details{% if criteria.neighborhoods_include %} open{% endif %}>
+              <summary>רק בשכונות האלה <span class="text-body-secondary small">(ריק = כל השכונות)</span></summary>
+              <div class="neighborhood-list mt-2">
+                {% for name in neighborhoods %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="neighborhoods_include" value="{{ name }}" id="ni-{{ loop.index }}"
+                         {% if name in criteria.neighborhoods_include %}checked{% endif %}>
+                  <label class="form-check-label" for="ni-{{ loop.index }}">{{ name }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </div>
+          <div class="col-md-6">
+            <details{% if criteria.neighborhoods_exclude %} open{% endif %}>
+              <summary>בלי השכונות האלה</summary>
+              <div class="neighborhood-list mt-2">
+                {% for name in neighborhoods %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="neighborhoods_exclude" value="{{ name }}" id="ne-{{ loop.index }}"
+                         {% if name in criteria.neighborhoods_exclude %}checked{% endif %}>
+                  <label class="form-check-label" for="ne-{{ loop.index }}">{{ name }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </div>
+          {% endif %}
+          <div class="col-12">
+            <label class="form-label" for="exclude_keywords">מילים שפוסלות מודעה <span class="text-body-secondary small">(שורה לכל ביטוי, מילים שלמות)</span></label>
+            <textarea id="exclude_keywords" name="exclude_keywords" rows="3" class="form-control">{{ criteria.exclude_keywords | join('\n') }}</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer bg-body d-flex align-items-center gap-3">
+        <button class="btn btn-primary">שמור</button>
+        <small class="text-body-secondary">שינוי בעיר, בחדרים, במחיר או בסוג הנכס מתחיל ריצת בסיס שקטה, כדי שלא תקבל הצפה של מודעות ישנות.</small>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-lg-5 d-flex flex-column gap-4">
+    <section class="card shadow-sm" id="telegram">
+      <div class="card-header bg-body fw-semibold">✈️ טלגרם</div>
+      <div class="card-body" id="telegram-body">
+        {% include "partials/telegram.html" %}
+      </div>
+    </section>
+
+    <form class="card shadow-sm" method="post" action="/settings/preferences">
+      <div class="card-header bg-body fw-semibold">🔔 התראות ותזמון</div>
+      <div class="card-body">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" role="switch" name="notifications_paused" value="1" id="paused"
+                 {% if preferences.notifications_paused %}checked{% endif %}>
+          <label class="form-check-label" for="paused">השהה התראות (הבדיקות ממשיכות)</label>
+        </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" name="notify_price_drops" value="1" id="drops"
+                 {% if preferences.notify_price_drops %}checked{% endif %}>
+          <label class="form-check-label" for="drops">התראה על ירידת מחיר</label>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-12 small text-body-secondary">שעות שקטות - ההודעות מגיעות בלי צליל</div>
+          <div class="col-6"><input type="time" name="quiet_hours_start" class="form-control" value="{{ preferences.quiet_hours_start.strftime('%H:%M') }}" aria-label="התחלה"></div>
+          <div class="col-6"><input type="time" name="quiet_hours_end" class="form-control" value="{{ preferences.quiet_hours_end.strftime('%H:%M') }}" aria-label="סוף"></div>
+        </div>
+        <div class="row g-2">
+          <div class="col-12 small text-body-secondary">שעות לילה - בדיקות בתדירות נמוכה יותר</div>
+          <div class="col-6"><input type="time" name="night_start" class="form-control" value="{{ preferences.night_start.strftime('%H:%M') }}" aria-label="התחלה"></div>
+          <div class="col-6"><input type="time" name="night_end" class="form-control" value="{{ preferences.night_end.strftime('%H:%M') }}" aria-label="סוף"></div>
+        </div>
+      </div>
+      <div class="card-footer bg-body"><button class="btn btn-primary">שמור</button></div>
+    </form>
+
+    <div class="card shadow-sm">
+      <div class="card-header bg-body fw-semibold">📤 ייצוא</div>
+      <div class="card-body">
+        <a class="btn btn-outline-secondary btn-sm" href="/export.csv">הורד את כל המודעות (CSV לאקסל)</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

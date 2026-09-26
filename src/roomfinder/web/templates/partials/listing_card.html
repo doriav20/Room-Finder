@@ -1,0 +1,53 @@
+{% set l = card.listing %}
+<article class="card listing-card h-100 shadow-sm status-{{ l.status }}{% if l.removed_at %} is-removed{% endif %}" id="listing-{{ l.id }}">
+  <div class="position-relative">
+    {% if l.images %}
+    <img src="{{ l.images[0] }}" class="card-img-top listing-photo" alt="" loading="lazy" referrerpolicy="no-referrer">
+    {% else %}
+    <div class="card-img-top listing-photo listing-photo-empty">🏠</div>
+    {% endif %}
+    <div class="photo-badges">
+      <span class="badge text-bg-dark">{{ source_labels.get(l.source, l.source) }}</span>
+      {% if l.status == 'new' %}<span class="badge text-bg-success">חדש</span>{% endif %}
+      {% if card.price_drop %}<span class="badge text-bg-danger">📉 ירד מ-{{ card.price_drop | price }}</span>{% endif %}
+      {% if l.removed_at %}<span class="badge text-bg-secondary">הוסרה</span>{% endif %}
+      {% if not l.matches %}<span class="badge text-bg-warning">לא מתאימה לחיפוש</span>{% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-baseline">
+      <div class="listing-price">{{ l.price | price }}</div>
+      <small class="text-body-secondary" title="{{ l.first_seen_at | local_datetime }}">{{ l.first_seen_at | ago }}</small>
+    </div>
+    <div class="fw-semibold">
+      {{ l.rooms | rooms }} חדרים{% if l.sqm %} · {{ l.sqm }} מ״ר{% endif %}{% if l.floor is not none %} · {{ l.floor | floor }}{% endif %}
+    </div>
+    <div class="text-body-secondary">
+      📍 {{ card.address or 'כתובת לא צוינה' }}
+    </div>
+    <div class="mt-2 d-flex flex-wrap gap-1">
+      {% if l.is_agency is true %}<span class="chip">תיווך</span>{% elif l.is_agency is false %}<span class="chip chip-private">פרטי</span>{% endif %}
+      {% if l.property_type %}<span class="chip">{{ l.property_type | property_label }}</span>{% endif %}
+      {% for feature in l.features[:6] %}<span class="chip chip-feature">{{ feature }}</span>{% endfor %}
+    </div>
+    {% if card.duplicates %}
+    <div class="small mt-2">🔁 גם ב:
+      {% for dup in card.duplicates %}<a href="{{ dup.url }}" target="_blank" rel="noopener noreferrer">{{ source_labels.get(dup.source, dup.source) }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    <textarea class="form-control form-control-sm mt-2 notes" name="notes" rows="1" placeholder="הערות…"
+              hx-post="/listings/{{ l.id }}/notes" hx-trigger="change" hx-swap="none">{{ l.notes or '' }}</textarea>
+  </div>
+  <div class="card-footer bg-body d-flex gap-1 flex-wrap">
+    <a class="btn btn-sm btn-primary" href="{{ l.url }}" target="_blank" rel="noopener noreferrer">למודעה ↗</a>
+    <button class="btn btn-sm {% if l.status == 'favorite' %}btn-warning{% else %}btn-outline-warning{% endif %}"
+            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "favorite"}'
+            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="מועדפים">⭐</button>
+    <button class="btn btn-sm {% if l.status == 'contacted' %}btn-success{% else %}btn-outline-success{% endif %}"
+            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "contacted"}'
+            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="יצרתי קשר">📞</button>
+    <button class="btn btn-sm {% if l.status == 'hidden' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "hidden"}'
+            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="לא רלוונטי">🙈</button>
+  </div>
+</article>

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}מודעות · RoomFinder{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <h1 class="h3 mb-0">מודעות</h1>
+  <span class="text-body-secondary">{{ criteria_summary }}</span>
+  <button id="enable-notifications" class="btn btn-sm btn-outline-secondary ms-auto" hidden>🔔 הפעל התראות בדפדפן</button>
+</div>
+
+<div id="new-banner" class="alert alert-success d-flex align-items-center gap-2" hidden>
+  <span>🏠 <strong id="new-count"></strong> מודעות חדשות נמצאו מאז שהדף נטען.</span>
+  <a class="btn btn-sm btn-success ms-auto" href="/?tab=new">הצג</a>
+</div>
+
+<ul class="nav nav-pills mb-3 gap-1">
+  {% for key, label, count in tabs %}
+  <li class="nav-item">
+    <a class="nav-link{% if key == tab %} active{% endif %}" href="?{{ tab_query(key) }}">
+      {{ label }} <span class="badge {% if key == tab %}text-bg-light{% else %}text-bg-secondary{% endif %}">{{ count }}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+
+<form class="row g-2 align-items-end mb-4" method="get" action="/">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-source">אתר</label>
+    <select id="f-source" name="source" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">הכול</option>
+      {% for name, label in source_labels.items() %}
+      <option value="{{ name }}"{% if filters.source == name %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-3">
+    <label class="form-label small mb-1" for="f-neighborhood">שכונה</label>
+    <select id="f-neighborhood" name="neighborhood" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">כל השכונות</option>
+      {% for name in neighborhoods %}
+      <option value="{{ name }}"{% if filters.neighborhood == name %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-price">עד מחיר</label>
+    <input id="f-price" name="price_max" type="number" min="0" step="100" class="form-control form-control-sm"
+           value="{{ filters.price_max or '' }}" placeholder="₪" onchange="this.form.submit()">
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-sort">מיון</label>
+    <select id="f-sort" name="sort" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="newest"{% if filters.sort == 'newest' %} selected{% endif %}>החדשות קודם</option>
+      <option value="price_asc"{% if filters.sort == 'price_asc' %} selected{% endif %}>מחיר: מהזול</option>
+      <option value="price_desc"{% if filters.sort == 'price_desc' %} selected{% endif %}>מחיר: מהיקר</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-3">
+    <div class="form-check form-switch mb-1">
+      <input class="form-check-input" type="checkbox" role="switch" id="f-all" name="all" value="1"
+             {% if filters.all %}checked{% endif %} onchange="this.form.submit()">
+      <label class="form-check-label small" for="f-all">להציג גם מודעות שלא מתאימות לחיפוש</label>
+    </div>
+  </div>
+</form>
+
+{% if tab == 'new' and cards %}
+<form method="post" action="/listings/mark-seen" class="mb-3">
+  <button class="btn btn-sm btn-outline-secondary">✔ סמן את כל החדשות כנראו</button>
+</form>
+{% endif %}
+
+<div id="grid" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3" data-latest-id="{{ latest_id }}">
+  {% include "partials/listing_cards.html" %}
+</div>
+{% if not cards %}
+<div class="text-center text-body-secondary py-5">
+  {% if tab == 'new' %}אין מודעות חדשות כרגע. ההתראה תגיע ברגע שתתפרסם אחת.{% else %}אין מודעות להצגה.{% endif %}
+</div>
+{% endif %}
+{% endblock %}
