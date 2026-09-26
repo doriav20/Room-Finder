@@ -14,12 +14,14 @@ from playwright.async_api import Page
 
 from roomfinder.normalize import (
     canonical_property_type,
+    clean_multiline,
     clean_text,
     parse_floor,
+    parse_int,
     parse_price,
     parse_rooms,
 )
-from roomfinder.schemas import ListingData, SearchCriteria
+from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
 from roomfinder.sources.base import FetchResult, Source, SourceError, human_pause
 
 SITE = "https://www.homeless.co.il"
@@ -31,6 +33,9 @@ ISRAEL = ZoneInfo("Asia/Jerusalem")
 PHOTO, KIND, CITY, NEIGHBORHOOD, ADDRESS, ROOMS, FLOOR, PRICE, ENTRY, UPDATED = range(1, 11)
 
 _STREET_AND_NUMBER = re.compile(r"^(?P<street>.*?)\s+(?P<number>\d+\s*[א-ת]?)$")
+
+# Option labels on a listing page, written the way the other sites write them
+FEATURE_LABELS = {"ממד": 'ממ"ד', "מזגן": "מיזוג"}
 
 
 def _cell(cells: list[Tag], index: int) -> str | None:
@@ -73,6 +78,39 @@ def _parse_row(row: Tag) -> ListingData | None:
     )
 
 
+def parse_details(html: str) -> ListingDetails:
+    """A listing page: property options are icons marked "on" or "off"."""
+    soup = BeautifulSoup(html, "lxml")
+    options: dict[str, tuple[bool | None, str | None]] = {}
+    for option in soup.select("div.IconOption"):
+        classes = option.get("class") or []
+        label, _, value = (clean_text(option.get_text(" ")) or "").partition(":")
+        state = True if "on" in classes else False if "off" in classes else None
+        options[label.strip()] = (state, value.strip() or None)
+
+    remarks = soup.select_one("div.remarks")
+    text = clean_multiline(remarks.get_text("\n")) if remarks else None
+    description, _, furniture_details = (text or "").partition("פירוט הריהוט:")
+
+    parking_state, parking_kind = options.get("חניה", (None, None))
+    parking = parking_state
+    if parking_state and parking_kind and "ברחוב" in parking_kind:
+        parking = False  # street parking isn't a parking of the apartment's own
+    return ListingDetails(
+        description=clean_multiline(description),
+        furnished=options.get("ריהוט", (None, None))[0],
+        furniture_details=clean_text(furniture_details),
+        parking=parking,
+        sqm=parse_int(options.get('מ"ר', (None, None))[1]),
+        entry_date=options.get("כניסה", (None, None))[1],
+        features=[
+            FEATURE_LABELS.get(label, label)
+            for label, (state, _) in options.items()
+            if state and label not in ("ריהוט", "חניה")
+        ],
+    )
+
+
 def parse_page(html: str) -> tuple[list[ListingData], bool]:
     """The listings on one result page, and whether there is a next page."""
     soup = BeautifulSoup(html, "lxml")
@@ -87,6 +125,14 @@ class HomelessSource(Source):
     label = "הומלס"
     default_interval_minutes = 30
     night_interval_minutes = 60
+    has_details = True
+
+    async def fetch_details(self, page: Page, source_id: str, url: str) -> ListingDetails | None:
+        response = await page.goto(url, wait_until="domcontentloaded")
+        if response is not None and response.status == 404:
+            return None
+        html = await page.content()
+        return parse_details(html) if "IconOption" in html else None
 
     def search_url(self, criteria: SearchCriteria) -> str:
         return f"{SITE}/rent/city={quote(criteria.city)}"

@@ -55,6 +55,15 @@ def clean_text(value: Any) -> str | None:
     return text or None
 
 
+def clean_multiline(value: Any) -> str | None:
+    """Like clean_text, but keeps the line breaks of an ad's text."""
+    if value is None:
+        return None
+    lines = [clean_text(line) for line in str(value).splitlines()]
+    text = "\n".join(line for line in lines if line)
+    return text or None
+
+
 def _first_number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None

@@ -56,12 +56,14 @@ def test_listing_fields():
         "29",
     )
     assert first.property_type == PropertyType.APARTMENT
-    assert first.features == ["חניה"]
+    assert first.parking is True
+    assert first.features == []
     assert first.images == ["https://onmap.pro/images/1.gallery.webp"]
     assert first.posted_at == datetime(2026, 7, 11, 7, 9, 51, 218000, tzinfo=UTC)
     assert (second.price, second.sqm, second.floor, second.house_number) == (None, None, 0, None)
     assert second.neighborhood == "נווה הדרים"
     assert second.property_type == PropertyType.PENTHOUSE
+    assert second.parking is None
     assert second.features == []
     assert second.posted_at is None
 

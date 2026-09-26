@@ -1,6 +1,8 @@
 import copy
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,6 +14,7 @@ from roomfinder.sources.yad2 import (
     feed_api_params,
     is_challenge,
     parse_feed,
+    parse_item_details,
     parse_next_data,
     search_params,
 )
@@ -214,6 +217,56 @@ async def test_bot_check_page_raises_blocked():
 
     with pytest.raises(BlockedError):
         await Yad2Source().fetch(page, SearchCriteria(), None)
+
+
+def test_item_details():
+    details = parse_item_details(load("yad2_item.json")["data"])
+
+    assert details.furnished is True
+    assert details.furniture_details.startswith("אפשרות לשכור את הדירה מרוהטת")
+    assert (details.parking, details.parking_spaces) == (True, 2)
+    assert details.description == "דירה מושלמת ומרווחת.\nיש חניון סגור."
+    assert details.entry_date == "17/09/2026 (גמיש)"
+    assert details.posted_at == datetime(2026, 9, 16, 15, 53, 12, tzinfo=ZoneInfo("Asia/Jerusalem"))
+    assert details.features == ["מעלית", "מיזוג", "מרפסת", "משופצת"]
+
+
+def test_unticked_amenities_mean_no():
+    item = {"inProperty": {"includeElevator": True}, "metaData": {"description": "דירה יפה"}}
+
+    details = parse_item_details(item)
+
+    assert (details.furnished, details.parking, details.parking_spaces) == (False, False, None)
+
+
+def test_the_ad_text_can_say_yes():
+    item = {"inProperty": {}, "metaData": {"description": "הדירה מרוהטת, חניה בטאבו"}}
+
+    details = parse_item_details(item)
+
+    assert (details.furnished, details.parking) == (True, True)
+
+
+def test_without_amenity_flags_nothing_is_assumed():
+    details = parse_item_details({"metaData": {"description": "דירה יפה"}})
+
+    assert (details.furnished, details.parking) == (None, None)
+
+
+async def test_fetch_details_calls_the_item_api():
+    item = {"status": 200, "body": (FIXTURES / "yad2_item.json").read_text(encoding="utf-8")}
+    page = FakePage("", [item, {"status": 404, "body": ""}])
+
+    details = await Yad2Source().fetch_details(page, "tok00001", "https://x")
+    gone = await Yad2Source().fetch_details(page, "tok00002", "https://x")
+
+    assert page.api_urls == [
+        "https://gw.yad2.co.il/realestate-item/tok00001",
+        "https://gw.yad2.co.il/realestate-item/tok00002",
+    ]
+    assert page.visited == []  # the tab is already on Yad2
+    assert details.furnished is True
+    assert gone is None
 
 
 async def test_unexpected_page_is_a_source_error():

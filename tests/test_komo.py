@@ -4,7 +4,7 @@ import pytest
 
 from roomfinder.schemas import PropertyType, SearchCriteria
 from roomfinder.sources import komo
-from roomfinder.sources.komo import KomoSource, parse_page, search_params
+from roomfinder.sources.komo import KomoSource, parse_details, parse_page, search_params
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -77,6 +77,32 @@ def test_last_page_has_no_next():
 
     assert [listing.property_type for listing in listings] == [PropertyType.PENTHOUSE]
     assert has_next is False
+
+
+def test_listing_page_details():
+    details = parse_details(fixture("komo_detail.html"))
+
+    assert (details.furnished, details.furniture_details) == (True, "ריהוט חלקי")
+    assert (details.parking, details.parking_spaces) == (True, 1)
+    assert details.sqm == 125
+    assert details.description == "דירה גדולה ומרווחת, שרותים כפולים,\nחניה פרטית עם שער חשמלי"
+    assert details.features == ["מעלית", "מיזוג", "מחסן"]
+
+
+def test_unmarked_furniture_means_unfurnished():
+    html = fixture("komo_detail.html").replace('class="riut add"', 'class="riut"')
+
+    assert parse_details(html).furnished is False
+
+
+async def test_fetch_details_skips_pages_without_the_details_section():
+    page = FakePage([fixture("komo_detail.html"), "<html>המודעה הוסרה</html>"])
+
+    found = await KomoSource().fetch_details(page, "1", "https://www.komo.co.il/x")
+    gone = await KomoSource().fetch_details(page, "2", "https://www.komo.co.il/y")
+
+    assert found.furnished is True
+    assert gone is None
 
 
 def test_search_params():

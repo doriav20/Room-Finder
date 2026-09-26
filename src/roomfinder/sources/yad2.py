@@ -8,28 +8,49 @@ embedded in it, and the following pages come from the JSON API that the site its
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from playwright.async_api import Page
 
 from roomfinder.normalize import (
     canonical_property_type,
+    clean_multiline,
     clean_text,
+    furniture_from_text,
+    parking_from_text,
     parse_floor,
     parse_int,
     parse_price,
     parse_rooms,
 )
-from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
+from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 from roomfinder.sources.base import BlockedError, FetchResult, Source, SourceError, human_pause
 
 log = logging.getLogger(__name__)
 
 SITE = "https://www.yad2.co.il"
 FEED_API = "https://gw.yad2.co.il/realestate-feed/rent/feed"
+ITEM_API = "https://gw.yad2.co.il/realestate-item/{token}"
 ITEM_URL = SITE + "/realestate/item/{token}"
 MAX_PAGES = 15
+ISRAEL = ZoneInfo("Asia/Jerusalem")
+
+# Amenity flags of a listing (inProperty). A flag the advertiser didn't tick is left out.
+AMENITY_FLAGS = {
+    "includeElevator": "מעלית",
+    "includeAirconditioner": "מיזוג",
+    "includeBalcony": "מרפסת",
+    "includeSecurityRoom": 'ממ"ד',
+    "includeWarehouse": "מחסן",
+    "includeBars": "סורגים",
+    "includeBoiler": "דוד שמש",
+    "isRenovated": "משופצת",
+    "isHandicapped": "גישה לנכים",
+    "isPetsAllowed": "חיות מחמד",
+}
 
 # Buckets in a feed page that hold listings; the others (trio, kingOfTheHar...) advertise agencies
 LISTING_BUCKETS = ("private", "agency", "platinum", "booster")
@@ -169,6 +190,55 @@ def total_pages(feed: dict[str, Any]) -> int:
     return int((feed.get("pagination") or {}).get("totalPages") or 1)
 
 
+def _local_datetime(value: Any) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=ISRAEL)
+
+
+def _entry_date(flags: dict[str, Any], details: dict[str, Any]) -> str | None:
+    if flags.get("isImmediateEntrance"):
+        return "מיידי"
+    entrance = _local_datetime(details.get("entranceDate"))
+    if entrance is None:
+        return None
+    flexible = " (גמיש)" if details.get("isEnterDateFlexible") else ""
+    return f"{entrance:%d/%m/%Y}{flexible}"
+
+
+def parse_item_details(item: dict[str, Any]) -> ListingDetails:
+    """The listing's own data, from the item API."""
+    flags = item.get("inProperty") or {}
+    details = item.get("additionalDetails") or {}
+    description = clean_multiline((item.get("metaData") or {}).get("description"))
+    furniture_details = clean_text(item.get("furnitureInfo"))
+    spaces = parse_int(details.get("parkingSpacesCount"))
+
+    text_furnished = furniture_from_text(" ".join(filter(None, [furniture_details, description])))
+    text_parking = parking_from_text(description)
+    if isinstance(item.get("inProperty"), dict):
+        # Unticked amenities are left out of inProperty, so "missing" means "no" - unless
+        # the ad's own text says otherwise
+        furnished = bool(flags.get("includeFurniture")) or bool(text_furnished)
+        parking = bool(flags.get("includeParking")) or bool(spaces) or bool(text_parking)
+    else:
+        furnished = text_furnished
+        parking = True if spaces else text_parking
+
+    return ListingDetails(
+        description=description,
+        furnished=furnished,
+        furniture_details=furniture_details,
+        parking=parking,
+        parking_spaces=spaces or None,
+        entry_date=_entry_date(flags, details),
+        posted_at=_local_datetime((item.get("dates") or {}).get("createdAt")),
+        features=[label for flag, label in AMENITY_FLAGS.items() if flags.get(flag)],
+    )
+
+
 def feed_api_params(page_props: dict[str, Any], criteria: SearchCriteria) -> dict[str, str]:
     """The API parameters the page itself used (fall back to our own when missing)."""
     key = page_props.get("feedQueryKey")
@@ -185,6 +255,7 @@ class Yad2Source(Source):
     label = "יד2"
     default_interval_minutes = 10
     night_interval_minutes = 30
+    has_details = True
 
     def search_url(self, criteria: SearchCriteria) -> str:
         slug = _city(criteria)["region_slug"]
@@ -229,19 +300,34 @@ class Yad2Source(Source):
             await page.wait_for_timeout(5000)
         raise BlockedError(f"Yad2 shows a bot check: {await page.title()!r}")
 
+    async def fetch_details(self, page: Page, source_id: str, url: str) -> ListingDetails | None:
+        # The API is called from a Yad2 page, like the site does; normally the tab is still
+        # on the search results
+        if not page.url.startswith(SITE):
+            await page.goto(f"{SITE}/realestate/rent", wait_until="domcontentloaded")
+        item = await self._api_json(page, ITEM_API.format(token=source_id), allow_missing=True)
+        return parse_item_details(item) if item is not None else None
+
     async def _api_page(self, page: Page, params: dict[str, str], number: int) -> dict[str, Any]:
         url = f"{FEED_API}?{urlencode(params | {'page': str(number)})}"
+        return await self._api_json(page, url)
+
+    async def _api_json(
+        self, page: Page, url: str, *, allow_missing: bool = False
+    ) -> dict[str, Any] | None:
         result = await page.evaluate(_FETCH_JSON, url)
         status = result["status"]
         if status in (401, 403, 429):
             raise BlockedError(f"Yad2 API answered {status}")
+        if status == 404 and allow_missing:
+            return None
         if status != 200:
             raise SourceError(f"Yad2 API answered {status}")
         try:
             body = json.loads(result["body"])
         except json.JSONDecodeError:
             raise BlockedError("Yad2 API returned a page instead of JSON") from None
-        feed = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(feed, dict):
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
             raise SourceError("Yad2 API response has no data")
-        return feed
+        return data

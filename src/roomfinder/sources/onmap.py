@@ -37,8 +37,8 @@ PROPERTY_TYPES = {
     "semidetached": PropertyType.HOUSE,
 }
 
-# Amenities in additional_info that are worth showing as tags
-FEATURES = {"parking": "חניה", "elevator": "מעלית", "balcony": "מרפסת", "storage": "מחסן"}
+# Amenities in additional_info that are worth showing as tags (parking has its own field)
+FEATURES = {"elevator": "מעלית", "balcony": "מרפסת", "storage": "מחסן"}
 
 
 def _city_slug(criteria: SearchCriteria) -> str:
@@ -124,6 +124,8 @@ def parse_item(item: dict[str, Any]) -> ListingData | None:
         longitude=location.get("lon"),
         images=images,
         features=[label for key, label in FEATURES.items() if _has(info.get(key))],
+        # Only a parking that is there counts; an empty field may just be unfilled
+        parking=True if _has(info.get("parking")) else None,
         posted_at=_posted_at(item.get("created_at")),
     )
 

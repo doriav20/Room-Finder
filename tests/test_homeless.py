@@ -6,9 +6,11 @@ import pytest
 
 from roomfinder.schemas import PropertyType, SearchCriteria
 from roomfinder.sources import homeless
-from roomfinder.sources.homeless import HomelessSource, parse_page
+from roomfinder.sources.homeless import HomelessSource, parse_details, parse_page
 
-PAGE1 = (Path(__file__).parent / "fixtures" / "homeless_page1.html").read_text(encoding="utf-8")
+FIXTURES = Path(__file__).parent / "fixtures"
+PAGE1 = (FIXTURES / "homeless_page1.html").read_text(encoding="utf-8")
+DETAIL = (FIXTURES / "homeless_detail.html").read_text(encoding="utf-8")
 LAST_PAGE = PAGE1.replace("הבא &gt;", "")
 
 
@@ -62,6 +64,32 @@ def test_listing_fields():
     assert (second.neighborhood, second.street, second.house_number) == (None, "הרצל", None)
     assert second.floor == 0
     assert second.images == []
+
+
+def test_listing_page_details():
+    details = parse_details(DETAIL)
+
+    assert details.furnished is True
+    assert details.furniture_details == "מטבח מודרני, פינת אוכל, מיטה זוגית וארונות קיר"
+    assert details.description == "דירת 4 חדרים ענקית במרכז העיר. משופצת."
+    assert (details.parking, details.parking_spaces) == (True, None)
+    assert (details.sqm, details.entry_date) == (110, "מיידי")
+    assert details.features == ["מעלית", "מיזוג", "מרפסת"]
+
+
+def test_street_parking_is_not_parking():
+    details = parse_details(DETAIL.replace("חניה: פרטית - מקורה", "חניה: ברחוב"))
+
+    assert details.parking is False
+
+
+def test_options_that_are_off():
+    html = DETAIL.replace(
+        'IconOption on"><span><img src="/Images/BoardImages/furniture',
+        'IconOption off"><span><img src="/Images/BoardImages/furniture',
+    )
+
+    assert parse_details(html).furnished is False
 
 
 def test_search_url_uses_the_city_name():
