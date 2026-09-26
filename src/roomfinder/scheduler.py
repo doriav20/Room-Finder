@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,6 +34,21 @@ def next_delay_seconds(
     if failures:
         minutes = min(minutes * 2**failures, MAX_BACKOFF_MINUTES)
     return minutes * 60 * rng.uniform(1 - JITTER, 1 + JITTER)
+
+
+def first_delay_seconds(
+    last_run_at: datetime | None, interval_minutes: float, now: datetime, rng: random.Random
+) -> float:
+    """When to check a source after the app starts.
+
+    The schedule continues from the last check, so restarting the app doesn't make every
+    site get checked again right away. A short random delay spreads the first checks.
+    """
+    stagger = rng.uniform(5, 45)
+    if last_run_at is None:
+        return stagger
+    due_in = (last_run_at + timedelta(minutes=interval_minutes) - now).total_seconds()
+    return max(stagger, due_in)
 
 
 class Scheduler:
@@ -66,8 +82,7 @@ class Scheduler:
         self._tasks.clear()
 
     async def _loop(self, name: str) -> None:
-        # Spread the first runs so the sources don't all start together
-        await asyncio.sleep(self._rng.uniform(5, 45))
+        await asyncio.sleep(await self._first_delay(name))
         while True:
             try:
                 if await self._enabled(name):
@@ -78,6 +93,17 @@ class Scheduler:
                 delay = 300
             log.debug("Next %s check in %.0f minutes", name, delay / 60)
             await asyncio.sleep(delay)
+
+    async def _first_delay(self, name: str) -> float:
+        async with self.sessionmaker() as session:
+            state = await get_source_state(session, name)
+            await session.commit()
+        return first_delay_seconds(
+            state.last_run_at,
+            state.interval_minutes or self.sources[name].default_interval_minutes,
+            utcnow(),
+            self._rng,
+        )
 
     async def _enabled(self, name: str) -> bool:
         async with self.sessionmaker() as session:

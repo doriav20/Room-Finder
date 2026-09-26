@@ -1,14 +1,15 @@
 import contextlib
 import random
-from datetime import time
+from datetime import time, timedelta
 
 import pytest
 from sqlalchemy import select
 
 from roomfinder.config import Settings
+from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, RunStatus, SourceRun, SourceState
 from roomfinder.runner import FAILURE_ALERT_THRESHOLD, SourceRunner
-from roomfinder.scheduler import MAX_BACKOFF_MINUTES, next_delay_seconds
+from roomfinder.scheduler import MAX_BACKOFF_MINUTES, first_delay_seconds, next_delay_seconds
 from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
 from roomfinder.settings_store import Preferences, save_criteria, save_preferences
 from roomfinder.sources.base import BlockedError, FetchResult, Source
@@ -210,6 +211,32 @@ async def test_empty_result_from_a_busy_source_is_an_error(runner, source):
     report = await runner.run("fake")
 
     assert report.status == RunStatus.ERROR
+
+
+async def test_runs_cut_off_by_a_restart_are_closed(runner, sessionmaker):
+    async with sessionmaker() as session:
+        session.add(SourceRun(source="fake", status=RunStatus.RUNNING))
+        session.add(SourceRun(source="fake", status=RunStatus.OK))
+        await session.commit()
+
+    assert await runner.close_interrupted_runs() == 1
+
+    async with sessionmaker() as session:
+        statuses = [run.status for run in await session.scalars(select(SourceRun))]
+        assert sorted(statuses) == [RunStatus.ERROR, RunStatus.OK]
+
+
+def test_first_check_after_start_continues_the_schedule():
+    rng = random.Random(1)
+    now = utcnow()
+
+    never = first_delay_seconds(None, 10, now, rng)
+    recent = first_delay_seconds(now - timedelta(minutes=2), 10, now, rng)
+    overdue = first_delay_seconds(now - timedelta(hours=1), 10, now, rng)
+
+    assert 5 <= never <= 45
+    assert recent == pytest.approx(8 * 60, abs=1)
+    assert 5 <= overdue <= 45
 
 
 def test_next_delay_uses_night_interval_jitter_and_backoff():
