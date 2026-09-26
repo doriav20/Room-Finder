@@ -147,6 +147,73 @@ class TelegramChat(Base):
     user_id: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # The dashboard account that connected this chat; its chats go when the account does
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+
+class Role(StrEnum):
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class User(Base):
+    """A dashboard account. Accounts are only created through invite links."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64))
+    # Case-folded username, so "Dor" and "dor" can't both exist
+    username_key: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default=Role.MEMBER)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == Role.ADMIN
+
+
+class UserSession(Base):
+    """A signed-in browser. The cookie holds a random token; only its hash is stored."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    user_agent: Mapped[str | None] = mapped_column(String(256))
+
+
+class InviteKind(StrEnum):
+    REGISTER = "register"
+    RESET = "reset"
+
+
+class Invite(Base):
+    """A one-time link: to create an account, or to set a new password for one."""
+
+    __tablename__ = "invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(16), default=InviteKind.REGISTER)
+    role: Mapped[str] = mapped_column(String(16), default=Role.MEMBER)
+    # For a reset link: the account whose password it sets
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # Who it's for, so the admin can tell invites apart
+    note: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class Setting(Base):
