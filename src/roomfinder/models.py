@@ -129,9 +129,9 @@ class Notification(Base):
 
 
 class TelegramChat(Base):
-    """The owner's private chat with the bot, paired through a one-time link from the dashboard.
+    """A private chat of a user allowed to use the bot, paired with a one-time link.
 
-    The bot ignores every update that doesn't come from this user.
+    The bot ignores every update from users that aren't in this table.
     """
 
     __tablename__ = "telegram_chats"
