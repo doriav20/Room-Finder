@@ -396,20 +396,30 @@ class TelegramService:
 
     async def _on_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed_message(update):
-            await self._set_paused(True)
-            await update.message.reply_text("🔕 ההתראות הושהו. הבדיקות ממשיכות ברקע (/resume).")
+            if await self._set_paused(True):
+                text = "🔕 ההתראות הושהו. הבדיקות ממשיכות ברקע (/resume)."
+            else:
+                text = "🔕 ההתראות כבר מושהות (/resume כדי להחזיר אותן)."
+            await update.message.reply_text(text)
 
     async def _on_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._allowed_message(update):
-            await self._set_paused(False)
-            await update.message.reply_text("🔔 ההתראות חזרו.")
+            if await self._set_paused(False):
+                text = "🔔 ההתראות חזרו."
+            else:
+                text = "🔔 ההתראות כבר מופעלות."
+            await update.message.reply_text(text)
 
-    async def _set_paused(self, paused: bool) -> None:
+    async def _set_paused(self, paused: bool) -> bool:
+        """Pause or resume notifications; False when they were already that way."""
         async with self.sessionmaker() as session:
             preferences = await get_preferences(session)
+            if preferences.notifications_paused == paused:
+                return False
             preferences.notifications_paused = paused
             await save_preferences(session, preferences)
             await session.commit()
+        return True
 
     async def _on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

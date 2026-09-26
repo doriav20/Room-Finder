@@ -187,6 +187,21 @@ async def test_start_with_a_valid_code_pairs_the_chat(service):
     assert "מחובר" in reply.calls[0][0][0]
 
 
+async def test_pause_and_resume_say_when_nothing_changed(paired):
+    replies = []
+    for command in ("resume", "pause", "pause", "resume"):
+        update, reply = start_update(OWNER_ID)
+        await getattr(paired, f"_on_{command}")(update, SimpleNamespace(args=[]))
+        replies.append(reply.calls[0][0][0])
+
+    assert replies == [
+        "🔔 ההתראות כבר מופעלות.",
+        "🔕 ההתראות הושהו. הבדיקות ממשיכות ברקע (/resume).",
+        "🔕 ההתראות כבר מושהות (/resume כדי להחזיר אותן).",
+        "🔔 ההתראות חזרו.",
+    ]
+
+
 async def test_strangers_get_no_answer(paired):
     update, reply = start_update(STRANGER_ID)
 
