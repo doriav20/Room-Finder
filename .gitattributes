@@ -1,0 +1,10 @@
+# Keep LF everywhere so scripts and configs work inside the Linux container
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
