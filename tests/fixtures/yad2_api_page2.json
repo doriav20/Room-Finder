@@ -1,0 +1,37 @@
+{
+  "data": {
+    "private": [
+      {
+        "address": {
+          "city": {"text": "ראשון לציון"},
+          "neighborhood": {"text": "קריית ראשון"},
+          "street": {"text": "ז'בוטינסקי"},
+          "house": {"number": 12, "floor": 3}
+        },
+        "adType": "private",
+        "price": 6200,
+        "token": "tok00004",
+        "additionalDetails": {"property": {"text": "דירה"}, "roomsCount": 4, "squareMeter": 100},
+        "metaData": {"coverImage": "https://img.yad2.co.il/Pic/4a.jpeg", "images": ["https://img.yad2.co.il/Pic/4a.jpeg"]},
+        "tags": []
+      }
+    ],
+    "agency": [],
+    "platinum": [
+      {
+        "address": {"city": {"text": "ראשון לציון"}, "street": {"text": "רוטשילד"}, "house": {"number": 7, "floor": 5}},
+        "adType": "commercial",
+        "price": 6900,
+        "token": "tok00003",
+        "additionalDetails": {"property": {"text": "גג/ פנטהאוז"}, "roomsCount": 4, "squareMeter": 120},
+        "metaData": {}
+      }
+    ],
+    "kingOfTheHar": [],
+    "trio": [],
+    "booster": [],
+    "leadingBroker": [],
+    "pagination": {"total": 45, "totalPages": 2}
+  },
+  "message": "Get realestate feed items successfully"
+}

@@ -1,0 +1,91 @@
+{
+  "feedQueryKey": [
+    "realestate-rent-feed",
+    {"city": "8300", "area": "9", "region": "1", "minRooms": "4", "maxRooms": "4"}
+  ],
+  "feed": {
+    "private": [
+      {
+        "address": {
+          "region": {"text": "מרכז והשרון", "id": 1},
+          "city": {"text": "ראשון לציון"},
+          "area": {"text": "אזור ראשון לציון והסביבה"},
+          "neighborhood": {"text": "רמב\"ם"},
+          "street": {"text": "הרצל"},
+          "house": {"number": 53, "floor": 2},
+          "coords": {"lon": 34.807158, "lat": 31.971567}
+        },
+        "subcategoryId": 2,
+        "categoryId": 2,
+        "adType": "private",
+        "price": 5800,
+        "token": "tok00001",
+        "additionalDetails": {
+          "property": {"text": "דירה"},
+          "roomsCount": 4,
+          "squareMeter": 90,
+          "propertyCondition": {"id": 2},
+          "promotions": []
+        },
+        "metaData": {
+          "coverImage": "https://img.yad2.co.il/Pic/1a.jpeg",
+          "images": ["https://img.yad2.co.il/Pic/1a.jpeg", "https://img.yad2.co.il/Pic/1b.jpeg"]
+        },
+        "tags": [
+          {"name": "חניה", "id": 1003, "priority": 1},
+          {"name": "ממ\"ד", "id": 1209, "priority": 1}
+        ],
+        "orderId": 57534258,
+        "priority": 3
+      },
+      {
+        "address": {
+          "city": {"text": "ראשון לציון"},
+          "neighborhood": {"text": "נחלת יהודה"},
+          "street": {"text": "ביאליק"},
+          "house": {"floor": 0}
+        },
+        "adType": "private",
+        "price": 0,
+        "token": "tok00002",
+        "additionalDetails": {"property": {"text": "דירת גן"}, "roomsCount": 4},
+        "metaData": {"coverImage": "https://img.yad2.co.il/Pic/2a.jpeg"},
+        "tags": []
+      }
+    ],
+    "agency": [
+      {
+        "address": {
+          "city": {"text": "ראשון לציון"},
+          "neighborhood": {"text": "נווה הדרים"},
+          "street": {"text": "רוטשילד"},
+          "house": {"number": 7, "floor": 5}
+        },
+        "adType": "commercial",
+        "price": 6900,
+        "token": "tok00003",
+        "customer": {"agencyName": "משרד תיווך לדוגמה"},
+        "additionalDetails": {"property": {"text": "גג/ פנטהאוז"}, "roomsCount": 4, "squareMeter": 120},
+        "metaData": {"images": []},
+        "tags": [{"name": "מעלית", "id": 1204, "priority": 1}]
+      }
+    ],
+    "yad1": {"topGallery": [], "listing": {"gray": []}},
+    "platinum": [
+      {
+        "address": {"city": {"text": "ראשון לציון"}, "street": {"text": "רוטשילד"}, "house": {"number": 7, "floor": 5}},
+        "adType": "commercial",
+        "price": 6900,
+        "token": "tok00003",
+        "additionalDetails": {"property": {"text": "גג/ פנטהאוז"}, "roomsCount": 4, "squareMeter": 120},
+        "metaData": {}
+      }
+    ],
+    "kingOfTheHar": [{"logo": "//images.yad2.co.il/logo.jpeg", "name": "משרד", "agencyId": "1", "adCount": 4}],
+    "trio": [{"logo": "//images.yad2.co.il/logo2.png", "name": "משרד אחר", "agencyId": "2", "adCount": 2}],
+    "booster": [],
+    "leadingBroker": [{"agencyLogo": "//images.yad2.co.il/logo3.png", "agencyName": "עוד משרד", "agencyId": "3"}],
+    "pagination": {"total": 45, "totalPages": 2},
+    "lookalike": []
+  }
+}
