@@ -1,0 +1,148 @@
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from sqlalchemy import JSON, BigInteger, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from roomfinder.db import Base, UTCDateTime, utcnow
+
+
+class ListingStatus(StrEnum):
+    NEW = "new"
+    SEEN = "seen"
+    FAVORITE = "favorite"
+    CONTACTED = "contacted"
+    HIDDEN = "hidden"
+
+
+class RunStatus(StrEnum):
+    RUNNING = "running"
+    OK = "ok"
+    BLOCKED = "blocked"
+    ERROR = "error"
+
+
+class Listing(Base):
+    __tablename__ = "listings"
+    __table_args__ = (UniqueConstraint("source", "source_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_id: Mapped[str] = mapped_column(String(128))
+    url: Mapped[str] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    price: Mapped[int | None]
+    rooms: Mapped[float | None]
+    sqm: Mapped[int | None]
+    floor: Mapped[int | None]
+    total_floors: Mapped[int | None]
+    property_type: Mapped[str | None] = mapped_column(String(32))
+    city: Mapped[str | None] = mapped_column(String(64))
+    neighborhood: Mapped[str | None] = mapped_column(String(128))
+    street: Mapped[str | None] = mapped_column(String(128))
+    house_number: Mapped[str | None] = mapped_column(String(16))
+    latitude: Mapped[float | None]
+    longitude: Mapped[float | None]
+    is_agency: Mapped[bool | None]
+    entry_date: Mapped[str | None] = mapped_column(String(64))
+    images: Mapped[list[str]] = mapped_column(JSON, default=list)
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    matches: Mapped[bool] = mapped_column(default=True)
+    status: Mapped[str] = mapped_column(String(16), default=ListingStatus.NEW, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    # Normalized "street|house number", used to spot the same apartment on several sites
+    address_key: Mapped[str | None] = mapped_column(String(160), index=True)
+    duplicate_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("listings.id", ondelete="SET NULL"), index=True
+    )
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    price_changes: Mapped[list["PriceChange"]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+        order_by="PriceChange.seen_at",
+    )
+
+
+class PriceChange(Base):
+    __tablename__ = "price_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), index=True
+    )
+    old_price: Mapped[int | None]
+    new_price: Mapped[int | None]
+    seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    listing: Mapped[Listing] = relationship(back_populates="price_changes")
+
+
+class SourceRun(Base):
+    __tablename__ = "source_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    status: Mapped[str] = mapped_column(String(16), default=RunStatus.RUNNING)
+    found: Mapped[int] = mapped_column(default=0)
+    new: Mapped[int] = mapped_column(default=0)
+    baseline: Mapped[bool] = mapped_column(default=False)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class SourceState(Base):
+    __tablename__ = "source_state"
+
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    interval_minutes: Mapped[int | None]
+    custom_url: Mapped[str | None] = mapped_column(Text)
+    # Hash of everything that changes what the source returns; a change triggers a baseline run
+    fetch_signature: Mapped[str | None] = mapped_column(String(64))
+    consecutive_failures: Mapped[int] = mapped_column(default=0)
+    failure_alert_sent: Mapped[bool] = mapped_column(default=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int | None] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), index=True
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(16))
+    message_id: Mapped[int | None] = mapped_column(BigInteger)
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class TelegramChat(Base):
+    """The owner's private chat with the bot, paired through a one-time link from the dashboard.
+
+    The bot ignores every update that doesn't come from this user.
+    """
+
+    __tablename__ = "telegram_chats"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    name: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
