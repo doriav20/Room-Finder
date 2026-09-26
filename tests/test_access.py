@@ -101,7 +101,10 @@ def test_no_generated_api_docs(client):
 
 
 def test_static_files_and_sign_in_page_are_public(anonymous):
-    assert anonymous.get("/static/app.css").status_code == 200
+    stylesheet = anonymous.get("/static/app.css")
+    assert stylesheet.status_code == 200 and stylesheet.headers["Cache-Control"] == "no-cache"
+    again = anonymous.get("/static/app.css", headers={"If-None-Match": stylesheet.headers["ETag"]})
+    assert again.status_code == 304
     page = anonymous.get("/login")
     assert page.status_code == 200 and "כניסה" in page.text
 

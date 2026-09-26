@@ -177,7 +177,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
-        if not request.url.path.startswith(PUBLIC_PREFIXES):
+        if request.url.path.startswith(PUBLIC_PREFIXES):
+            # Stylesheets and scripts are checked with the server on every load (a cheap
+            # "not modified"), so after an update no page runs with last version's files
+            response.headers["Cache-Control"] = "no-cache"
+        else:
             response.headers["Cache-Control"] = "no-store"
         return response
 
