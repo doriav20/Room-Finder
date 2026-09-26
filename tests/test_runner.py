@@ -3,14 +3,15 @@ import random
 from datetime import time, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from roomfinder import runner as runner_module
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, RunStatus, SourceRun, SourceState
-from roomfinder.runner import FAILURE_ALERT_THRESHOLD, SourceRunner
+from roomfinder.runner import DETAILS_BACKFILL_PER_RUN, FAILURE_ALERT_THRESHOLD, SourceRunner
 from roomfinder.scheduler import MAX_BACKOFF_MINUTES, first_delay_seconds, next_delay_seconds
-from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
+from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 from roomfinder.settings_store import Preferences, save_criteria, save_preferences
 from roomfinder.sources.base import BlockedError, FetchResult, Source
 
@@ -27,6 +28,9 @@ class FakeSource(Source):
 
     def __init__(self) -> None:
         self.results: list[FetchResult | Exception] = []
+        # Listing pages by source id: ListingDetails, None (page gone) or an exception
+        self.pages: dict[str, ListingDetails | Exception | None] = {}
+        self.pages_read: list[str] = []
 
     def search_url(self, criteria: SearchCriteria) -> str:
         return "https://example.com/search"
@@ -37,15 +41,24 @@ class FakeSource(Source):
             raise result
         return result
 
+    async def fetch_details(self, page, source_id, url):
+        self.pages_read.append(source_id)
+        details = self.pages.get(source_id, ListingDetails())
+        if isinstance(details, Exception):
+            raise details
+        return details
+
 
 class RecordingNotifier:
     def __init__(self) -> None:
         self.new: list[tuple[str, bool]] = []
+        self.new_listings: list[Listing] = []
         self.drops: list[tuple[str, int, int]] = []
         self.messages: list[str] = []
 
     async def new_listing(self, listing, *, silent):
         self.new.append((listing.source_id, silent))
+        self.new_listings.append(listing)
 
     async def price_drop(self, listing, old_price, new_price, *, silent):
         self.drops.append((listing.source_id, old_price, new_price))
@@ -76,6 +89,18 @@ def listings(*ids: str, price: int = 6000) -> FetchResult:
 @pytest.fixture
 def source():
     return FakeSource()
+
+
+@pytest.fixture
+def detailed_source(source, monkeypatch):
+    """The fake source, with listing pages to read."""
+
+    async def instant(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runner_module, "human_pause", instant)
+    monkeypatch.setattr(FakeSource, "has_details", True)
+    return source
 
 
 @pytest.fixture
@@ -211,6 +236,75 @@ async def test_empty_result_from_a_busy_source_is_an_error(runner, source):
     report = await runner.run("fake")
 
     assert report.status == RunStatus.ERROR
+
+
+async def test_new_listing_page_is_read_before_notifying(
+    runner, detailed_source, notifier, no_quiet_hours
+):
+    detailed_source.results = [listings("a"), listings("a", "b")]
+    detailed_source.pages["b"] = ListingDetails(furnished=True, parking=True, parking_spaces=1)
+
+    await runner.run("fake")
+    report = await runner.run("fake")
+
+    assert report.new == 1
+    [listing] = notifier.new_listings
+    assert (listing.source_id, listing.furnished, listing.parking) == ("b", True, True)
+
+
+async def test_listing_page_can_rule_out_a_new_listing(
+    runner, detailed_source, notifier, sessionmaker, no_quiet_hours
+):
+    async with sessionmaker() as session:
+        await save_criteria(session, SearchCriteria(furnished="yes"))
+        await session.commit()
+    detailed_source.results = [listings("a"), listings("a", "b")]
+    detailed_source.pages["b"] = ListingDetails(furnished=False)
+
+    await runner.run("fake")
+    report = await runner.run("fake")
+
+    assert report.new == 0
+    assert notifier.new == []
+    async with sessionmaker() as session:
+        listing = await session.scalar(select(Listing).where(Listing.source_id == "b"))
+        assert (listing.matches, listing.status) == (False, ListingStatus.SEEN)
+        run = await session.scalar(select(SourceRun).order_by(SourceRun.id.desc()))
+        assert run.new == 0
+
+
+async def test_older_listing_pages_are_read_a_few_per_run(runner, detailed_source, sessionmaker):
+    ids = [f"l{n}" for n in range(DETAILS_BACKFILL_PER_RUN + 2)]
+    detailed_source.results = [listings(*ids), listings(*ids)]
+
+    await runner.run("fake")
+    assert len(detailed_source.pages_read) == DETAILS_BACKFILL_PER_RUN
+    await runner.run("fake")
+
+    assert sorted(detailed_source.pages_read) == sorted(ids)
+    async with sessionmaker() as session:
+        unchecked = await session.scalar(
+            select(func.count()).where(Listing.details_checked_at.is_(None))
+        )
+        assert unchecked == 0
+
+
+async def test_unreadable_listing_pages_do_not_stop_the_notification(
+    runner, detailed_source, notifier, sessionmaker, no_quiet_hours
+):
+    detailed_source.results = [listings("a"), listings("a", "b", "c")]
+    detailed_source.pages["a"] = ListingDetails()
+    detailed_source.pages["b"] = RuntimeError("page layout changed")
+    detailed_source.pages["c"] = BlockedError("captcha")
+
+    await runner.run("fake")
+    report = await runner.run("fake")
+
+    assert report.status == RunStatus.OK
+    assert sorted(source_id for source_id, _ in notifier.new) == ["b", "c"]
+    async with sessionmaker() as session:
+        listing = await session.scalar(select(Listing).where(Listing.source_id == "b"))
+        assert listing.details_checked_at is None  # tried again later
 
 
 async def test_runs_cut_off_by_a_restart_are_closed(runner, sessionmaker):

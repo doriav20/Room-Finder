@@ -15,23 +15,34 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
-from roomfinder.models import Listing, RunStatus, SourceRun, SourceState
+from roomfinder.models import Listing, ListingStatus, RunStatus, SourceRun, SourceState
 from roomfinder.notify import Notifier
-from roomfinder.pipeline import IngestOutcome, ingest, mark_removed
+from roomfinder.pipeline import IngestOutcome, apply_details, ingest, mark_removed
 from roomfinder.schemas import SearchCriteria
 from roomfinder.settings_store import Preferences, get_criteria, get_preferences
-from roomfinder.sources.base import BlockedError, Source
+from roomfinder.sources.base import BlockedError, FetchResult, Source, human_pause
 from roomfinder.timeutils import in_daily_window, local_time
 
 log = logging.getLogger(__name__)
 
 FAILURE_ALERT_THRESHOLD = 3
+# Older listings whose pages are read per run, besides the new ones
+DETAILS_BACKFILL_PER_RUN = 4
 # An empty result from a source that had this many live listings means the site changed
 SUSPICIOUS_EMPTY_THRESHOLD = 5
 
 
 class BrowserSessions(Protocol):
     def session(self) -> AbstractAsyncContextManager[Any]: ...
+
+
+@dataclass
+class _Stored:
+    outcome: IngestOutcome
+    preferences: Preferences
+    baseline: bool
+    recovered: bool
+    matching: int
 
 
 @dataclass
@@ -122,12 +133,38 @@ class SourceRunner:
         try:
             async with self.browser.session() as page:
                 result = await source.fetch(page, criteria, custom_url)
+                stored = await self._store(source, run_id, criteria, custom_url, result)
+                if isinstance(stored, RunReport):
+                    return stored
+                if source.has_details:
+                    await self._add_details(source, page, run_id, stored.outcome, criteria)
         except BlockedError as exc:
             return await self._fail(source, run_id, RunStatus.BLOCKED, str(exc) or "bot check")
         except Exception as exc:
             log.exception("Source %s failed", source.name)
             return await self._fail(source, run_id, RunStatus.ERROR, f"{type(exc).__name__}: {exc}")
 
+        outcome = stored.outcome
+        log.info(
+            "%s: found %d, new %d, price drops %d, removed %d%s",
+            source.name, outcome.found, len(outcome.to_notify), len(outcome.price_drops),
+            outcome.removed, " (baseline)" if stored.baseline else "",
+        )  # fmt: skip
+        await self._notify(
+            source, outcome, stored.preferences, stored.baseline, stored.recovered, stored.matching
+        )
+        return RunReport(
+            source.name, RunStatus.OK, outcome.found, len(outcome.to_notify), stored.baseline
+        )
+
+    async def _store(
+        self,
+        source: Source,
+        run_id: int,
+        criteria: SearchCriteria,
+        custom_url: str | None,
+        result: FetchResult,
+    ) -> "_Stored | RunReport":
         now = utcnow()
         async with self.sessionmaker() as session:
             state = await get_source_state(session, source.name)
@@ -163,14 +200,69 @@ class SourceRunner:
             preferences = await get_preferences(session)
             matching = await _count_listings(session, source.name, matching=True)
             await session.commit()
+        return _Stored(outcome, preferences, baseline, recovered, matching)
 
-        log.info(
-            "%s: found %d, new %d, price drops %d, removed %d%s",
-            source.name, outcome.found, len(outcome.to_notify), len(outcome.price_drops),
-            outcome.removed, " (baseline)" if baseline else "",
-        )  # fmt: skip
-        await self._notify(source, outcome, preferences, baseline, recovered, matching)
-        return RunReport(source.name, RunStatus.OK, outcome.found, run.new, baseline)
+    async def _add_details(
+        self,
+        source: Source,
+        page: Any,
+        run_id: int,
+        outcome: IngestOutcome,
+        criteria: SearchCriteria,
+    ) -> None:
+        """Read the pages of new listings (and a few older ones) for furniture, parking and text.
+
+        A new listing's page can rule it out (e.g. unfurnished when furniture is required), so
+        this happens before notifying.
+        """
+        new_ids = [listing.id for listing in outcome.to_notify]
+        async with self.sessionmaker() as session:
+            backfill = (
+                select(Listing.id)
+                .where(
+                    Listing.source == source.name,
+                    Listing.details_checked_at.is_(None),
+                    Listing.removed_at.is_(None),
+                    Listing.duplicate_of_id.is_(None),
+                    Listing.matches.is_(True),
+                    Listing.status != ListingStatus.HIDDEN,
+                    Listing.id.not_in(new_ids),
+                )
+                .order_by(Listing.first_seen_at.desc())
+                .limit(DETAILS_BACKFILL_PER_RUN)
+            )
+            targets = new_ids + list(await session.scalars(backfill))
+
+        for index, listing_id in enumerate(targets):
+            if index:
+                await human_pause(2.0, 5.0)
+            async with self.sessionmaker() as session:
+                listing = await session.get(Listing, listing_id)
+                try:
+                    details = await source.fetch_details(page, listing.source_id, listing.url)
+                except BlockedError as exc:
+                    log.warning("%s: stopped reading listing pages: %s", source.name, exc)
+                    break
+                except Exception:
+                    log.exception("%s: reading listing %s failed", source.name, listing.url)
+                    continue
+                apply_details(listing, details, criteria, utcnow())
+                await session.commit()
+
+        if not new_ids:
+            return
+        async with self.sessionmaker() as session:
+            still_matching = []
+            for listing_id in new_ids:
+                listing = await session.get(Listing, listing_id)
+                if listing.matches:
+                    still_matching.append(listing)
+                else:
+                    listing.status = ListingStatus.SEEN
+            run = await session.get(SourceRun, run_id)
+            run.new = len(still_matching)
+            await session.commit()
+        outcome.to_notify = still_matching
 
     async def _notify(
         self,
