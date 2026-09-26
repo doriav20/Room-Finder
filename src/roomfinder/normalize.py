@@ -44,6 +44,7 @@ _PROPERTY_TYPE_KEYWORDS: tuple[tuple[str, PropertyType], ...] = (
     ("וילה", PropertyType.HOUSE),
     ("משק", PropertyType.HOUSE),
     ("דירה", PropertyType.APARTMENT),
+    ("דירות", PropertyType.APARTMENT),
 )
 
 
