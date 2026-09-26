@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -52,8 +52,26 @@ class ListingData(BaseModel):
     entry_date: str | None = None
     images: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
+    furnished: bool | None = None
+    furniture_details: str | None = None
+    parking: bool | None = None
+    parking_spaces: int | None = None
     posted_at: datetime | None = None
     raw: dict[str, Any] | None = None
+
+
+class ListingDetails(BaseModel):
+    """What a listing's own page adds to the search results."""
+
+    description: str | None = None
+    furnished: bool | None = None
+    furniture_details: str | None = None
+    parking: bool | None = None
+    parking_spaces: int | None = None
+    sqm: int | None = None
+    entry_date: str | None = None
+    posted_at: datetime | None = None
+    features: list[str] = Field(default_factory=list)
 
 
 class SearchCriteria(BaseModel):
@@ -74,6 +92,8 @@ class SearchCriteria(BaseModel):
         ]
     )
     private_only: bool = False
+    furnished: Literal["any", "yes", "no"] = "any"
+    parking_required: bool = False
     neighborhoods_include: list[str] = Field(default_factory=list)
     neighborhoods_exclude: list[str] = Field(default_factory=list)
     # Matched as whole words, so "שותף" would not hit "חצר משותפת"

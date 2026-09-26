@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from roomfinder.dedupe import find_duplicate
 from roomfinder.matching import listing_matches
 from roomfinder.models import Listing, ListingStatus, PriceChange
-from roomfinder.normalize import address_key
-from roomfinder.schemas import ListingData, SearchCriteria
+from roomfinder.normalize import address_key, furniture_from_text, parking_from_text
+from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
 
 # A listing that disappeared from a healthy source for this long is considered taken down
 REMOVAL_GRACE = timedelta(hours=48)
@@ -52,6 +52,10 @@ def _apply(listing: Listing, item: ListingData, now: datetime) -> None:
         "longitude",
         "is_agency",
         "entry_date",
+        "furnished",
+        "furniture_details",
+        "parking",
+        "parking_spaces",
         "posted_at",
         "raw",
     ):
@@ -159,6 +163,37 @@ async def ingest(
             _update(listing, item, criteria, baseline, now, session, outcome)
     await session.flush()
     return outcome
+
+
+def apply_details(
+    listing: Listing, details: ListingDetails | None, criteria: SearchCriteria, now: datetime
+) -> None:
+    """Add what the listing's own page says, then judge the listing again."""
+    listing.details_checked_at = now
+    if details is not None:
+        for name in (
+            "description",
+            "furnished",
+            "furniture_details",
+            "parking",
+            "parking_spaces",
+            "sqm",
+            "entry_date",
+            "posted_at",
+        ):
+            value = getattr(details, name)
+            if value is not None:
+                setattr(listing, name, value)
+        if details.features:
+            listing.features = list(dict.fromkeys([*listing.features, *details.features]))
+    # Sites without a structured field often say it in the ad's text
+    if listing.furnished is None:
+        listing.furnished = furniture_from_text(
+            " ".join(filter(None, [listing.furniture_details, listing.description]))
+        )
+    if listing.parking is None:
+        listing.parking = parking_from_text(listing.description)
+    listing.matches = listing_matches(listing, criteria)
 
 
 async def mark_removed(session: AsyncSession, source: str, now: datetime) -> int:

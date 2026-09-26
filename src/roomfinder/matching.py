@@ -18,6 +18,8 @@ class ListingLike(Protocol):
     city: str | None
     neighborhood: str | None
     is_agency: bool | None
+    furnished: bool | None
+    parking: bool | None
 
 
 def mismatch_reasons(listing: ListingLike, criteria: SearchCriteria) -> list[str]:
@@ -48,6 +50,14 @@ def mismatch_reasons(listing: ListingLike, criteria: SearchCriteria) -> list[str
 
     if criteria.private_only and listing.is_agency:
         reasons.append("agency")
+
+    if (criteria.furnished == "yes" and listing.furnished is False) or (
+        criteria.furnished == "no" and listing.furnished is True
+    ):
+        reasons.append("furnished")
+
+    if criteria.parking_required and listing.parking is False:
+        reasons.append("parking")
 
     neighborhood = normalize_neighborhood(listing.neighborhood)
     if neighborhood:

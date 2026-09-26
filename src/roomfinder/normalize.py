@@ -137,6 +137,55 @@ def address_key(street: Any, house_number: Any) -> str | None:
     return f"{street_name}|{number}"
 
 
+# Phrases in an ad's own text, used when the site has no structured field. Negative phrases
+# are checked first, since "לא מרוהטת" contains "מרוהטת".
+_NO_FURNITURE = ("ללא ריהוט", "בלי ריהוט", "לא מרוהטת", "לא מרוהט", "ללא רהיטים")
+_FURNITURE = ("מרוהטת", "מרוהט", "ריהוט מלא", "ריהוט חלקי", "כולל ריהוט", "עם ריהוט")
+_NO_PARKING = (
+    "ללא חניה",
+    "ללא חנייה",
+    "אין חניה",
+    "אין חנייה",
+    "בלי חניה",
+    "בלי חנייה",
+    "חניה ברחוב",
+    "חנייה ברחוב",
+)
+_PARKING = (
+    "חניה פרטית",
+    "חנייה פרטית",
+    "חניה בטאבו",
+    "חנייה בטאבו",
+    "חניה צמודה",
+    "חנייה צמודה",
+    "חניה מקורה",
+    "חנייה מקורה",
+    "חניה תת קרקעית",
+    "חנייה תת קרקעית",
+    "שתי חניות",
+    "2 חניות",
+)
+
+
+def _phrase_flag(text: Any, negative: tuple[str, ...], positive: tuple[str, ...]) -> bool | None:
+    cleaned = clean_text(text)
+    if not cleaned:
+        return None
+    if any(phrase in cleaned for phrase in negative):
+        return False
+    if any(phrase in cleaned for phrase in positive):
+        return True
+    return None
+
+
+def furniture_from_text(text: Any) -> bool | None:
+    return _phrase_flag(text, _NO_FURNITURE, _FURNITURE)
+
+
+def parking_from_text(text: Any) -> bool | None:
+    return _phrase_flag(text, _NO_PARKING, _PARKING)
+
+
 def contains_phrase(text: str | None, phrase: str) -> bool:
     """Whole-word match: "שותף" is found in "מחפש שותף" but not in "משותף"."""
     phrase = clean_text(phrase) or ""

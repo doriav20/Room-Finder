@@ -59,6 +59,25 @@ def test_private_only_rejects_agencies():
     assert listing_matches(make_listing(is_agency=None), criteria)
 
 
+def test_furniture_preference():
+    furnished_only = SearchCriteria(furnished="yes")
+    unfurnished_only = SearchCriteria(furnished="no")
+
+    assert listing_matches(make_listing(furnished=True), furnished_only)
+    assert mismatch_reasons(make_listing(furnished=False), furnished_only) == ["furnished"]
+    assert mismatch_reasons(make_listing(furnished=True), unfurnished_only) == ["furnished"]
+    assert listing_matches(make_listing(furnished=None), furnished_only)
+    assert listing_matches(make_listing(furnished=False), SearchCriteria())
+
+
+def test_parking_requirement():
+    criteria = SearchCriteria(parking_required=True)
+
+    assert listing_matches(make_listing(parking=True), criteria)
+    assert mismatch_reasons(make_listing(parking=False), criteria) == ["parking"]
+    assert listing_matches(make_listing(parking=None), criteria)
+
+
 def test_neighborhood_include_and_exclude_lists():
     listing = make_listing(neighborhood="נחלת יהודה")
     assert listing_matches(listing, SearchCriteria(neighborhoods_include=["נחלת יהודה"]))

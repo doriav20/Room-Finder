@@ -50,6 +50,13 @@ class Listing(Base):
     images: Mapped[list[str]] = mapped_column(JSON, default=list)
     # Amenity tags from the site, e.g. "חניה", "ממ"ד"
     features: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    furnished: Mapped[bool | None]
+    furniture_details: Mapped[str | None] = mapped_column(Text)
+    # Whether the apartment comes with its own parking (street parking doesn't count)
+    parking: Mapped[bool | None]
+    parking_spaces: Mapped[int | None]
+    # When the listing's own page was read for furniture, parking and the ad text
+    details_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

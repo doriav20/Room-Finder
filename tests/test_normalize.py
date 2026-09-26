@@ -4,9 +4,11 @@ from roomfinder.normalize import (
     address_key,
     canonical_property_type,
     contains_phrase,
+    furniture_from_text,
     normalize_city,
     normalize_house_number,
     normalize_street,
+    parking_from_text,
     parse_floor,
     parse_price,
     parse_rooms,
@@ -110,6 +112,34 @@ def test_address_key_ignores_street_prefixes_and_types():
 )
 def test_canonical_property_type(value, expected):
     assert canonical_property_type(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("דירה מרוהטת קומפלט", True),
+        ("מושכרת כולל ריהוט", True),
+        ("הדירה לא מרוהטת", False),
+        ("מושכרת ללא ריהוט", False),
+        ("דירה מוארת ומרווחת", None),
+        (None, None),
+    ],
+)
+def test_furniture_from_text(text, expected):
+    assert furniture_from_text(text) is expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("חנייה בטאבו ומחסן", True),
+        ("חניה פרטית עם שער חשמלי", True),
+        ("אין חניה, חניה ברחוב בשפע", False),
+        ("קרוב לתחבורה ציבורית", None),
+    ],
+)
+def test_parking_from_text(text, expected):
+    assert parking_from_text(text) is expected
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,8 @@ from sqlalchemy import select
 
 from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, PriceChange
-from roomfinder.pipeline import REMOVAL_GRACE, ingest, mark_removed
-from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
+from roomfinder.pipeline import REMOVAL_GRACE, apply_details, ingest, mark_removed
+from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 
 CRITERIA = SearchCriteria()
 
@@ -192,6 +192,61 @@ async def test_missing_values_keep_what_was_known(session):
     assert listing.sqm == 95
     assert listing.images == ["https://img/1.jpg"]
     assert listing.address_key == "הרצל|12"
+
+
+async def test_details_fill_in_furniture_parking_and_text(session):
+    now = utcnow()
+    await ingest(session, "yad2", [item("a1", features=["חניה"])], CRITERIA, baseline=True, now=now)
+    listing = await get_listing(session, "a1")
+
+    details = ListingDetails(
+        description="דירה מרווחת",
+        furnished=True,
+        furniture_details="ריהוט מלא",
+        parking=True,
+        parking_spaces=2,
+        features=["חניה", "מעלית"],
+    )
+    apply_details(listing, details, CRITERIA, now)
+
+    assert (listing.furnished, listing.furniture_details) == (True, "ריהוט מלא")
+    assert (listing.parking, listing.parking_spaces) == (True, 2)
+    assert listing.description == "דירה מרווחת"
+    assert listing.features == ["חניה", "מעלית"]
+    assert listing.details_checked_at == now
+
+
+async def test_details_fall_back_to_the_ad_text(session):
+    now = utcnow()
+    await ingest(session, "yad2", [item("a1")], CRITERIA, baseline=True, now=now)
+    listing = await get_listing(session, "a1")
+
+    apply_details(listing, ListingDetails(description="ללא ריהוט, חניה בטאבו"), CRITERIA, now)
+
+    assert (listing.furnished, listing.parking) == (False, True)
+
+
+async def test_details_can_rule_a_listing_out(session):
+    criteria = SearchCriteria(furnished="yes")
+    now = utcnow()
+    await ingest(session, "yad2", [item("a1")], criteria, baseline=True, now=now)
+    listing = await get_listing(session, "a1")
+    assert listing.matches is True
+
+    apply_details(listing, ListingDetails(furnished=False), criteria, now)
+
+    assert listing.matches is False
+
+
+async def test_missing_page_still_counts_as_checked(session):
+    now = utcnow()
+    await ingest(session, "yad2", [item("a1")], CRITERIA, baseline=True, now=now)
+    listing = await get_listing(session, "a1")
+
+    apply_details(listing, None, CRITERIA, now)
+
+    assert listing.details_checked_at == now
+    assert listing.furnished is None
 
 
 async def test_repeated_items_in_one_run_are_ingested_once(session):
