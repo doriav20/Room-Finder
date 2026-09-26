@@ -6,6 +6,12 @@ from roomfinder import models  # noqa: F401 - registers the tables
 from roomfinder.db import Base, create_sessionmaker
 
 
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch):
+    """Tests must never talk to the real bot configured in the developer's .env."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+
+
 @pytest.fixture
 async def engine():
     engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)

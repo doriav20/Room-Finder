@@ -1,6 +1,6 @@
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -18,14 +18,34 @@ from roomfinder.sources import build_sources
 log = logging.getLogger(__name__)
 
 
-def configure_logging(level: str) -> None:
+class RedactSecrets(logging.Filter):
+    """Keeps secrets such as the bot token (which libraries put in URLs) out of the logs."""
+
+    def __init__(self, secrets: Iterable[str]) -> None:
+        super().__init__()
+        self.secrets = [secret for secret in secrets if secret]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if any(secret in message for secret in self.secrets):
+            for secret in self.secrets:
+                message = message.replace(secret, "<redacted>")
+            record.msg, record.args = message, None
+        return True
+
+
+def configure_logging(level: str, secrets: Iterable[str] = ()) -> None:
     logging.basicConfig(
         level=level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         force=True,
     )
+    redact = RedactSecrets(secrets)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(redact)
     for noisy in ("httpx", "httpcore", "aiosqlite", "sqlalchemy.engine"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.INFO)
 
 
 async def start_telegram(settings: Settings, sessionmaker, sources) -> TelegramService | None:
@@ -49,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        configure_logging(settings.log_level)
+        configure_logging(settings.log_level, [settings.telegram_bot_token])
         engine = create_engine(settings.sqlalchemy_url)
         sessionmaker = create_sessionmaker(engine)
         browser = BrowserManager(settings.cdp_url)
