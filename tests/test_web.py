@@ -6,16 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from roomfinder.config import Settings
-from roomfinder.db import Base, utcnow
+from roomfinder.db import utcnow
 from roomfinder.main import create_app
 from roomfinder.models import Listing, ListingStatus, PriceChange
-
-
-@pytest.fixture
-def database_path(tmp_path):
-    path = tmp_path / "test.db"
-    Base.metadata.create_all(create_engine(f"sqlite:///{path}"))
-    return path
 
 
 @pytest.fixture

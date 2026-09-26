@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -10,6 +11,14 @@ from roomfinder.db import Base, create_sessionmaker
 def isolated_environment(monkeypatch):
     """Tests must never talk to the real bot configured in the developer's .env."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+
+
+@pytest.fixture
+def database_path(tmp_path):
+    """A SQLite file with the schema, for tests that start the whole app."""
+    path = tmp_path / "test.db"
+    Base.metadata.create_all(create_engine(f"sqlite:///{path}"))
+    return path
 
 
 @pytest.fixture

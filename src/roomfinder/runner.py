@@ -10,7 +10,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from roomfinder.config import Settings
@@ -88,6 +88,19 @@ class SourceRunner:
 
     def is_running(self, name: str) -> bool:
         return self._locks[name].locked()
+
+    async def close_interrupted_runs(self) -> int:
+        """Runs left "running" by a previous process were cut off by a restart."""
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                update(SourceRun)
+                .where(SourceRun.status == RunStatus.RUNNING)
+                .values(
+                    status=RunStatus.ERROR, error="Interrupted by a restart", finished_at=utcnow()
+                )
+            )
+            await session.commit()
+            return result.rowcount or 0
 
     async def run(self, name: str) -> RunReport:
         lock = self._locks[name]

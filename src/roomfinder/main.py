@@ -95,6 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.runner = runner
         app.state.telegram = telegram
 
+        await runner.close_interrupted_runs()
         if settings.scheduler_enabled:
             scheduler.start()
         try:
