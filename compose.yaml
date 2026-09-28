@@ -20,6 +20,12 @@ services:
     # Chrome needs more shared memory than Docker's 64MB default
     shm_size: 1gb
     restart: unless-stopped
+    # It runs for months at a time: keep at most 50MB of logs (docker compose logs still works)
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
 
 volumes:
   roomfinder-data:
