@@ -79,6 +79,8 @@
 
 כדי שהמעקב ירוץ תמיד, מומלץ להפעיל ב-Docker Desktop את **Start Docker Desktop when you sign in**, ולוודא שהמחשב לא נכנס למצב שינה. הקונטיינר עולה מחדש מעצמו (`restart: unless-stopped`).
 
+**להרצה קבועה על מחשב אחר בבית**, עם גישה מהטלפון מכל מקום, יש מדריך מלא: [HOSTING.md](HOSTING.md).
+
 ## שימוש יומיומי
 
 - **דשבורד** (http://localhost:8000):
