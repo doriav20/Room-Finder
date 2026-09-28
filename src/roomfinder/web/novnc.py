@@ -8,12 +8,12 @@ nothing about the browser can be seen or controlled.
 import asyncio
 import contextlib
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from roomfinder.auth import SESSION_COOKIE, user_for_token
+from roomfinder.web.security import same_origin
 
 NOVNC_DIR = Path("/usr/share/novnc")
 VNC_SERVER = ("127.0.0.1", 5900)
@@ -32,8 +32,7 @@ async def _signed_in_admin(websocket: WebSocket, token: str | None) -> bool:
 
 @router.websocket("/novnc/websockify")
 async def vnc_bridge(websocket: WebSocket) -> None:
-    origin = websocket.headers.get("origin")
-    if origin and urlsplit(origin).hostname not in websocket.app.state.settings.allowed_hosts:
+    if not same_origin(websocket.headers):
         await websocket.close(code=1008)
         return
     token = websocket.cookies.get(SESSION_COOKIE)

@@ -47,7 +47,7 @@ ACTIONS = [
 
 def invite_link(client, role: str = "member", note: str = "") -> str:
     html = client.post("/users/invites", data={"role": role, "note": note}).text
-    return re.search(r'value="(http://testserver/register\?token=[^"]+)"', html).group(1)
+    return re.search(r'value="(http://localhost:8000/register\?token=[^"]+)"', html).group(1)
 
 
 def register(client, link: str, username: str, password: str = PASSWORD):
@@ -149,7 +149,7 @@ def vnc_server(monkeypatch):
 
 
 def test_admins_reach_the_browser_through_the_dashboard(client, vnc_server):
-    headers = {"Origin": "http://localhost:8000"}
+    headers = {"Origin": "http://testserver"}
     with client.websocket_connect("/novnc/websockify", headers=headers) as browser:
         assert browser.receive_bytes() == b"RFB 003.008\n"
         browser.send_bytes(b"click")
@@ -303,7 +303,7 @@ def test_admins_do_not_change_their_own_account_from_the_users_page(client, admi
 def test_reset_link_sets_a_new_password(client, db):
     member = add_user(db, "noa", role=Role.MEMBER)
     html = client.post(f"/users/{member.id}/reset-link").text
-    link = re.search(r'value="(http://testserver/reset\?token=[^"]+)"', html).group(1)
+    link = re.search(r'value="(http://localhost:8000/reset\?token=[^"]+)"', html).group(1)
     client.post("/logout")
     token = link.split("token=")[1]
 
@@ -335,3 +335,61 @@ def test_change_own_password(client):
     assert right.headers["location"] == "/account?notice=password"
     client.post("/logout")
     sign_in(client, "admin", "another password")
+
+
+# --- hosted behind an HTTPS proxy (e.g. Tailscale serve, see HOSTING.md) ---------
+
+PROXY_HOST = "rf.tail1234.ts.net"
+
+
+def session_cookie(response) -> dict[str, str]:
+    token = re.search(rf"{SESSION_COOKIE}=([^;]+)", response.headers["set-cookie"]).group(1)
+    return {"Cookie": f"{SESSION_COOKIE}={token}"}
+
+
+def test_the_dashboard_works_behind_an_https_proxy(start_dashboard, admin):
+    # The proxy serves HTTPS to browsers and talks plain HTTP to the dashboard, keeping Host
+    proxied = start_dashboard(
+        base_url=f"http://{PROXY_HOST}",
+        dashboard_url=f"https://{PROXY_HOST}",
+        allowed_hosts=[PROXY_HOST],
+        cookie_secure=True,
+    )
+    origin = {"Origin": f"https://{PROXY_HOST}", "X-Forwarded-Proto": "https"}
+
+    page = proxied.get("/login").text
+    signed_in = proxied.post(
+        "/login", data={"username": "admin", "password": PASSWORD}, headers=origin,
+        follow_redirects=False,
+    )  # fmt: skip
+
+    # A full http:// address would be blocked on an HTTPS page
+    assert 'href="/static/app.css"' in page and "http://" + PROXY_HOST not in page
+    assert signed_in.status_code == 303
+    assert "secure" in signed_in.headers["set-cookie"].lower()
+    invite = proxied.post(
+        "/users/invites", data={"role": "member"}, headers=origin | session_cookie(signed_in)
+    )
+    assert f'value="https://{PROXY_HOST}/register?token=' in invite.text
+
+
+def test_the_hosted_dashboard_still_opens_on_the_machine_itself(start_dashboard, admin):
+    local = start_dashboard(
+        base_url="http://localhost:8000",
+        dashboard_url=f"https://{PROXY_HOST}",
+        allowed_hosts=[PROXY_HOST],
+        cookie_secure=True,
+    )
+
+    signed_in = local.post(
+        "/login", data={"username": "admin", "password": PASSWORD},
+        headers={"Origin": "http://localhost:8000"}, follow_redirects=False,
+    )  # fmt: skip
+    from_other_port = local.post(
+        "/login", data={"username": "admin", "password": PASSWORD},
+        headers={"Origin": "http://localhost:3000"}, follow_redirects=False,
+    )  # fmt: skip
+
+    assert signed_in.status_code == 303
+    assert from_other_port.status_code == 403
+    assert local.get("/", headers={"Host": "rebind.evil.example"}).status_code == 400

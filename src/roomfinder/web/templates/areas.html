@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}שכונות · RoomFinder{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', path='vendor/leaflet/leaflet.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ static_url('vendor/leaflet/leaflet.css') }}">{% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
   <h1 class="h3 mb-0">שכונות</h1>
@@ -78,7 +78,7 @@
 
 {% block scripts %}
 {% if city_map %}
-<script src="{{ url_for('static', path='vendor/leaflet/leaflet.js') }}"></script>
-<script src="{{ url_for('static', path='areas.js') }}"></script>
+<script src="{{ static_url('vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ static_url('areas.js') }}"></script>
 {% endif %}
 {% endblock %}

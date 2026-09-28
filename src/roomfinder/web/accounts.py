@@ -341,7 +341,7 @@ async def create_invite(request: Request) -> HTMLResponse:
             session, role=role, created_by=request.state.user, note=note
         )
         await session.commit()
-    link = str(request.url_for("register_page").include_query_params(token=token))
+    link = request.app.state.settings.link("/register", token=token)
     context = {"link": link, "qr_svg": _qr(link), "kind": "register", "note": note}
     return render_partial(request, "partials/invite_link.html", context)
 
@@ -420,7 +420,7 @@ async def create_reset_link(request: Request, user_id: int) -> HTMLResponse:
             session, kind=InviteKind.RESET, created_by=request.state.user, user=user
         )
         await session.commit()
-    link = str(request.url_for("reset_page").include_query_params(token=token))
+    link = request.app.state.settings.link("/reset", token=token)
     context = {"link": link, "qr_svg": _qr(link), "kind": "reset", "note": user.username}
     return render_partial(request, "partials/invite_link.html", context)
 

@@ -1,3 +1,5 @@
+import contextlib
+
 import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
@@ -124,16 +126,29 @@ def sign_in(client: TestClient, username: str = "admin", password: str = PASSWOR
 
 
 @pytest.fixture
-def anonymous(database_path):
+def start_dashboard(database_path):
+    """Starts the dashboard with some settings changed, e.g. as hosted behind a proxy."""
+    with contextlib.ExitStack() as stack:
+
+        def start(base_url: str = "http://testserver", **overrides) -> TestClient:
+            settings = Settings(
+                **{
+                    "database_url": f"sqlite+aiosqlite:///{database_path}",
+                    "scheduler_enabled": False,
+                    "cdp_url": "http://127.0.0.1:1",
+                    "allowed_hosts": ["testserver", "localhost"],
+                }
+                | overrides
+            )
+            return stack.enter_context(TestClient(create_app(settings), base_url=base_url))
+
+        yield start
+
+
+@pytest.fixture
+def anonymous(start_dashboard):
     """The dashboard, for a visitor who isn't signed in."""
-    settings = Settings(
-        database_url=f"sqlite+aiosqlite:///{database_path}",
-        scheduler_enabled=False,
-        cdp_url="http://127.0.0.1:1",
-        allowed_hosts=["testserver", "localhost"],
-    )
-    with TestClient(create_app(settings)) as client:
-        yield client
+    return start_dashboard()
 
 
 @pytest.fixture

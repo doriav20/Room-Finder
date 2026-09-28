@@ -8,7 +8,6 @@ import argparse
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
-from urllib.parse import urlencode
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -107,7 +106,7 @@ async def invite(admin: bool, note: str | None) -> None:
             await session.commit()
     finally:
         await engine.dispose()
-    link = f"{settings.dashboard_url.rstrip('/')}/register?{urlencode({'token': token})}"
+    link = settings.link("/register", token=token)
     kind = "admin" if admin else "member"
     print(
         f"One-time sign-up link ({kind}), valid until {invite_row.expires_at:%Y-%m-%d %H:%M} UTC:"
@@ -146,7 +145,7 @@ async def reset_link(username: str) -> None:
     finally:
         await engine.dispose()
     print(f"One-time password reset link for {user.username}, valid for 24 hours:")
-    print(f"{settings.dashboard_url.rstrip('/')}/reset?{urlencode({'token': token})}")
+    print(settings.link("/reset", token=token))
 
 
 def main() -> None:

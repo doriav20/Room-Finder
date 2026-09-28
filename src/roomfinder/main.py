@@ -4,7 +4,6 @@ import logging
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -27,7 +26,12 @@ from roomfinder.web.accounts import account_router, admin_router, public_router
 from roomfinder.web.novnc import add_novnc
 from roomfinder.web.routes import configure_templates
 from roomfinder.web.routes import router as web_router
-from roomfinder.web.security import LoginRequired, current_user, login_required_response
+from roomfinder.web.security import (
+    LoginRequired,
+    current_user,
+    login_required_response,
+    same_origin,
+)
 
 log = logging.getLogger(__name__)
 
@@ -159,12 +163,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def reject_cross_site_writes(request: Request, call_next):
         # Another site open in the browser must not be able to change anything here
-        origin = request.headers.get("origin")
-        if (
-            request.method not in ("GET", "HEAD", "OPTIONS")
-            and origin
-            and urlsplit(origin).hostname not in settings.allowed_hosts
-        ):
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not same_origin(request.headers):
             return PlainTextResponse("Cross-site request blocked", status_code=403)
         return await call_next(request)
 

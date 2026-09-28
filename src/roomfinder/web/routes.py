@@ -74,7 +74,14 @@ SETTABLE_STATUSES = {
 }
 
 
+def static_url(path: str) -> str:
+    # By path only: a full http:// address would be blocked on a page served over HTTPS
+    # by a proxy in front (e.g. Tailscale), which talks plain HTTP to the dashboard
+    return f"/static/{path}"
+
+
 def configure_templates(settings: Settings) -> None:
+    templates.env.globals["static_url"] = static_url
     filters = templates.env.filters
     filters["price"] = formatting.price
     filters["rooms"] = formatting.rooms

@@ -208,9 +208,16 @@ def test_cross_site_writes_are_blocked(client, db):
     same_site = client.post(
         f"/listings/{listing.id}/status",
         data={"status": "hidden"},
-        headers={"Origin": "http://localhost:8000"},
+        headers={"Origin": "http://testserver"},
     )
     assert same_site.status_code == 200
+    # A page from another port of the same machine is another site too
+    other_port = client.post(
+        f"/listings/{listing.id}/status",
+        data={"status": "seen"},
+        headers={"Origin": "http://testserver:3000"},
+    )
+    assert other_port.status_code == 403
 
 
 def test_unknown_host_names_are_rejected(client):

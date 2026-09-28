@@ -1,6 +1,7 @@
 """Who is signed in: request dependencies and the session cookie."""
 
-from urllib.parse import urlencode
+from collections.abc import Mapping
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -49,6 +50,20 @@ def login_required_response(request: Request, _exc: LoginRequired) -> Response:
         return Response(status_code=401, headers={"HX-Redirect": "/login"})
     target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
     return RedirectResponse(f"/login?{urlencode({'next': target})}", status_code=303)
+
+
+def same_origin(headers: Mapping[str, str]) -> bool:
+    """Whether a browser request comes from the dashboard's own pages.
+
+    Its Origin must be the address the request was sent to: the Host header, or the
+    X-Forwarded-Host that a proxy in front (e.g. Tailscale) passes on. A page on another site,
+    or on another port of this machine, can't make the browser send either header.
+    Requests without an Origin aren't from a web page (curl, the CLI); sign-in still applies.
+    """
+    origin = headers.get("origin")
+    if origin is None:
+        return True
+    return urlsplit(origin).netloc in {headers.get("host"), headers.get("x-forwarded-host")}
 
 
 def safe_next(target: str | None) -> str:
