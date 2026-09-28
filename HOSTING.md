@@ -16,18 +16,34 @@
                                                 └──(האינטרנט הביתי)──▶ יד2, מדלן, קומו... וטלגרם
 ```
 
+## Ubuntu Server או Windows?
+
+בשני המסלולים רצה אותה מערכת בדיוק (ב-Docker), עם אותה גישה דרך Tailscale.
+
+| | Ubuntu Server (מומלץ) | Windows עם Docker Desktop |
+|---|---|---|
+| **אחרי הפסקת חשמל או עדכון** | חוזר לבד | חוזר אחרי כניסה אוטומטית ל-Windows |
+| **זיכרון** | 4GB מספיקים | לפחות 8GB |
+| **עדכוני אבטחה** | עד 2031 (גרסה 26.04 LTS) | Windows 11: כן. Windows 10: כבר לא, אלא אם נרשמת להארכה, שנגמרת באוקטובר 2026 |
+| **מה שיש היום על המחשב** | נמחק בהתקנה | נשאר |
+| **ניהול מרחוק** | SSH | Remote Desktop (ב-Windows Pro) או SSH |
+| **היכרות** | חדש | כמו במחשב הראשי |
+
+- **מסלול Ubuntu Server:** שלבים 1-11 כאן למטה.
+- **מסלול Windows:** [בסוף המדריך](#מסלול-windows). מתאים אם במחשב הישן יש Windows 11 ולא רוצים למחוק אותו.
+
 ## מה צריך
 
 - **המחשב הישן:**
   - **מעבד:** Intel או AMD של 64 ביט. המערכת משתמשת ב-Google Chrome ללינוקס, שקיים רק למעבדים כאלה, כך שלא Raspberry Pi.
-  - **זיכרון:** לפחות 4GB, ועדיף 8GB. המערכת עצמה צורכת כ-1.2GB.
+  - **זיכרון:** לפחות 4GB ב-Ubuntu, ולפחות 8GB ב-Windows. המערכת עצמה צורכת כ-1.2GB.
   - **דיסק:** לפחות 40GB פנויים, ועדיף SSD. ה-image לבדו תופס כ-5GB, ובזמן הבנייה צריך בערך פי שניים.
   - **רשת:** עדיף בכבל לראוטר, אבל Wi-Fi גם עובד.
-- דיסק און קי של 8GB לפחות, לקובץ ההתקנה.
+- במסלול Ubuntu: דיסק און קי של 8GB לפחות, לקובץ ההתקנה.
 - מסך ומקלדת, רק לזמן ההתקנה.
 - שעה-שעתיים.
 
-> ⚠️ ההתקנה מוחקת את כל מה שיש על הדיסק של המחשב הישן. לגבות ממנו קודם כל מה שחשוב.
+> ⚠️ במסלול Ubuntu, ההתקנה מוחקת את כל מה שיש על הדיסק של המחשב הישן. לגבות ממנו קודם כל מה שחשוב.
 
 > 🔑 אחרי המעבר הדשבורד נגיש מהטלפון ומכל מקום (רק למכשירים שלך). אם סיסמת המנהל חלשה, להחליף אותה עכשיו בדף **החשבון שלי**.
 
@@ -40,8 +56,6 @@
 | `USER` | שם המשתמש ל-Linux שבוחרים בהתקנה (שלב 1) |
 | `SERVER_IP` | הכתובת של השרת ברשת הביתית, למשל `10.0.0.23` |
 | `TAILNET` | שם הרשת שלך ב-Tailscale, למשל `tail1a2b3c.ts.net` (שלב 5) |
-
-**למה Ubuntu Server ולא Windows:** הוא חינמי וקל, ורץ בלי שמישהו מחובר אליו. הוא גם לא נתקע על מסך התחברות אחרי עדכון. Docker Desktop ב-Windows, לעומת זאת, עולה רק אחרי כניסה של משתמש. אם בכל זאת רוצים להשאיר Windows, ראו [חלופה: Windows](#חלופה-להשאיר-את-windows) בסוף.
 
 ---
 
@@ -357,16 +371,154 @@ docker compose start
 
 ---
 
-## חלופה: להשאיר את Windows
+## מסלול Windows
 
-אפשר, אבל פחות אמין לאורך זמן:
+במסלול הזה המחשב הישן מריץ בדיוק את מה שרץ היום במחשב הראשי: Windows עם Docker Desktop. יש שני הבדלים מול שרת Ubuntu:
+- Docker Desktop רץ רק כשמשתמש מחובר ל-Windows. לכן מגדירים כניסה אוטומטית, ונעילה אוטומטית מיד אחריה.
+- אחרי עדכוני Windows המחשב מאתחל את עצמו. בערך 3 דקות אחר כך הכול חוזר.
 
-1. להתקין Docker Desktop ולהריץ את המערכת לפי ה-README.
-2. בהגדרות של Docker Desktop לסמן *Start Docker Desktop when you sign in*.
-3. להגדיר ב-Windows כניסה אוטומטית, כי בלי משתמש מחובר Docker Desktop לא עולה. זה פוגע באבטחה של המחשב עצמו.
-4. להגדיר שהמחשב לא ייכנס לשינה לעולם.
-5. להתקין Tailscale ל-Windows, ובחלון PowerShell כמנהל להריץ `tailscale serve --bg 8000`.
-6. להוסיף ל-`.env` את אותן שלוש שורות משלב 6.3.
-7. להעביר את הנתונים לפי שלבים 6.2-6.3, עם פקודות ה-PowerShell שב-README.
+### לפני שמתחילים
 
-אחרי עדכון של Windows המחשב מאתחל את עצמו. המערכת חוזרת רק אחרי שהכניסה האוטומטית מתבצעת.
+- **גרסה:** בודקים עם `winver`.
+  - Windows 11 מתאים.
+  - Windows 10 כבר לא מקבל עדכוני אבטחה, אלא אם נרשמת להארכה (שנגמרת באוקטובר 2026). מחשב שרץ כל הזמן ברשת צריך עדכונים, אז במקרה כזה עדיף לשדרג ל-Windows 11 אם המחשב מתאים, או לעבור למסלול Ubuntu.
+- **זיכרון:** לפחות 8GB.
+- **וירטואליזציה:** במנהל המשימות ← ביצועים ← CPU צריך להופיע *Virtualization: Enabled*. אם היא כבויה, מפעילים ב-BIOS (Intel VT-x, או AMD-V/SVM).
+- **חשבון:** משתמש עם סיסמה חזקה. עדיף חשבון מקומי ולא חשבון Microsoft, כי כך הכניסה האוטומטית (שלב W6) פשוטה יותר.
+
+### W1. הכנת Windows
+
+1. **עדכונים:** הגדרות ← Windows Update. להתקין הכול ולאתחל.
+2. **שם המחשב:** לשנות ל-`roomfinder` (הגדרות ← מערכת ← אודות ← שנה שם למחשב זה), ולאתחל. השם יהיה חלק מכתובת הדשבורד. כמו בשלב 1, לא לשים בו שם פרטי.
+3. **חשמל:** ב-PowerShell כמנהל:
+   ```powershell
+   powercfg /change standby-timeout-ac 0
+   powercfg /change hibernate-timeout-ac 0
+   powercfg /hibernate off
+   # במחשב נייד: סגירת המכסה כשהוא בחשמל לא עושה כלום
+   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+   powercfg /setactive SCHEME_CURRENT
+   ```
+4. **BIOS:** שיידלק לבד אחרי הפסקת חשמל, כמו בשלב 7.
+
+### W2. Docker Desktop
+
+```powershell
+winget install -e --id Docker.DockerDesktop
+```
+
+(או מההורדה ב-https://www.docker.com/products/docker-desktop/.)
+
+1. לאתחל כשמתבקשים, לפתוח את Docker Desktop, ולאשר את התנאים. זה קורה פעם אחת.
+2. ב-Settings ← General:
+   - לסמן *Start Docker Desktop when you sign in to your computer*.
+   - לבטל את *Open Docker Dashboard when Docker Desktop starts*.
+3. ב-Settings ← Software updates: לבטל הורדה אוטומטית של עדכונים. עדכון של Docker Desktop מחכה לפעמים ללחיצה, אז עדיף לעדכן ידנית כשנמצאים ליד המחשב.
+
+### W3. Git והקוד
+
+```powershell
+winget install -e --id Git.Git
+```
+
+לסגור את PowerShell ולפתוח מחדש (כדי ש-git יוכר), ואז:
+
+```powershell
+New-Item -ItemType Directory -Force -Path $HOME\.ssh | Out-Null
+ssh-keygen -t ed25519 -f $HOME\.ssh\roomfinder_deploy   # Enter פעמיים: בלי passphrase
+Get-Content $HOME\.ssh\roomfinder_deploy.pub
+```
+
+1. להוסיף את השורה שהודפסה כ-Deploy key ב-GitHub, בלי הרשאת כתיבה, בדיוק כמו בשלב 6.1.
+2. להוריד את הקוד:
+   ```powershell
+   Add-Content -Path $HOME\.ssh\config -Value "Host github-roomfinder`n  HostName github.com`n  User git`n  IdentityFile ~/.ssh/roomfinder_deploy`n  IdentitiesOnly yes"
+   git clone git@github-roomfinder:doriav20/Room-Finder.git $HOME\RoomFinder
+   ```
+3. כשנשאלים על המפתח של github.com, להשוות לטביעה ב[דף של GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).
+
+### W4. Tailscale
+
+1. להתקין מ-https://tailscale.com/download/windows (או `winget install -e --id tailscale.tailscale`) ולהתחבר.
+2. באייקון של Tailscale ליד השעון: *Preferences* ← לסמן *Run unattended*, כדי שיעבוד גם בלי משתמש מחובר.
+3. בלוח הבקרה: *Disable key expiry* לשרת, והפעלת *HTTPS Certificates*, כמו בשלב 5 (סעיפים 3-4).
+4. להתקין את Tailscale גם בטלפון ובמחשב הראשי (שלב 5, סעיף 5).
+
+### W5. העברת המערכת
+
+1. **במחשב הראשי:** לעצור ולגבות לפי שלב 6.2, בלי שתי שורות ה-`scp`.
+2. **העתקה:** להעתיק את `roomfinder-backup.tgz` ואת `.env` לתיקייה `RoomFinder` שבתיקיית המשתמש במחשב הישן. הכי פשוט בדיסק און קי, ולמחוק ממנו אחר כך. לא דרך ענן (OneDrive וכדומה), כי ב-`.env` נמצא ה-token של הבוט.
+3. **במחשב הישן:** להוסיף ל-`.env` את שלוש השורות משלב 6.3, עם `notepad $HOME\RoomFinder\.env`.
+4. ב-PowerShell:
+   ```powershell
+   cd $HOME\RoomFinder
+   docker compose build     # בפעם הראשונה 10-30 דקות
+   docker compose create
+   docker run --rm -v roomfinder_roomfinder-data:/data -v ${PWD}:/backup alpine tar xzf /backup/roomfinder-backup.tgz -C /
+   docker compose up -d
+   docker compose logs -f app   # Ctrl+C כדי לצאת
+   tailscale serve --bg 8000
+   ```
+   אם `tailscale serve` לא מצליח, להריץ אותו ב-PowerShell כמנהל.
+5. **ניקוי:** למחוק את `roomfinder-backup.tgz` מהמחשב הישן ומהדיסק און קי.
+
+### W6. כניסה אוטומטית ונעילה
+
+1. **כניסה אוטומטית:** להוריד את [Autologon](https://learn.microsoft.com/sysinternals/downloads/autologon) של Microsoft Sysinternals, להריץ, למלא שם משתמש וסיסמה, וללחוץ *Enable*. הסיסמה נשמרת מוצפנת, לא כטקסט.
+   - עם חשבון Microsoft ייתכן שצריך קודם לכבות את *For improved security, only allow Windows Hello sign-in* (הגדרות ← חשבונות ← אפשרויות כניסה).
+2. **נעילה מיד אחרי הכניסה**, כדי שמי שניגש למקלדת לא יקבל מחשב פתוח. Docker Desktop ממשיך לרוץ גם כשהמסך נעול. ב-PowerShell כמנהל:
+   ```powershell
+   $action = New-ScheduledTaskAction -Execute "rundll32.exe" -Argument "user32.dll,LockWorkStation"
+   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+   $trigger.Delay = "PT1M"
+   Register-ScheduledTask -TaskName "RoomFinder - lock after sign-in" -Action $action -Trigger $trigger
+   ```
+3. **בדיקה:** לאתחל את המחשב. אחרי כ-3 דקות המסך נעול, הדשבורד נפתח מהטלפון, והבוט עונה ל-`/status`.
+
+### W7. ניהול מרחוק (לא חובה)
+
+- **Windows Pro:** הגדרות ← מערכת ← Remote Desktop ← מופעל. מהמחשב הראשי מתחברים עם `mstsc /v:roomfinder`, דרך Tailscale.
+- **Windows Home:** אין בו Remote Desktop. לשורת פקודה אפשר להפעיל OpenSSH Server, ב-PowerShell כמנהל:
+  ```powershell
+  Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+  Set-Service -Name sshd -StartupType Automatic
+  Start-Service sshd
+  ```
+  ומהמחשב הראשי: `ssh USER@roomfinder`.
+
+### W8. תחזוקה
+
+**עדכון קוד:**
+
+```powershell
+cd $HOME\RoomFinder; git pull; docker compose up -d --build; docker image prune -f
+```
+
+**גיבוי לילי:** הסקריפט `scripts\backup.ps1` מגבה את מסד הנתונים בלי לעצור את המערכת. הוא שומר עותק לכל יום בתיקייה `RoomFinderBackups` שבתיקיית המשתמש, ומוחק עותקים בני יותר מ-30 יום. להפעלה כל לילה ב-04:30:
+
+```powershell
+$script = "$HOME\RoomFinder\scripts\backup.ps1"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+$trigger = New-ScheduledTaskTrigger -Daily -At 4:30am
+Register-ScheduledTask -TaskName "RoomFinder - nightly backup" -Action $action -Trigger $trigger
+Start-ScheduledTask -TaskName "RoomFinder - nightly backup"   # הרצת בדיקה עכשיו
+```
+
+אחרי הרצת הבדיקה צריך להופיע בתיקייה `RoomFinderBackups` קובץ עם התאריך של היום. מדי פעם כדאי להעתיק גיבויים גם למחשב אחר.
+
+**שחזור מגיבוי** (עם התאריך של הקובץ):
+
+```powershell
+cd $HOME\RoomFinder
+docker compose stop
+docker run --rm -v roomfinder_roomfinder-data:/data -v "$HOME\RoomFinderBackups:/backup" alpine sh -c "cp /backup/roomfinder-2026-10-01.db /data/roomfinder.db && rm -f /data/roomfinder.db-wal /data/roomfinder.db-shm"
+docker compose start
+```
+
+**עדכוני Windows ו-Docker Desktop:**
+- Windows מתעדכן ומאתחל לבד, בדרך כלל בלילה. אחרי האתחול הכול חוזר.
+- את Docker Desktop מעדכנים ידנית פעם בכמה חודשים.
+
+**מה עוד חל גם על Windows:** שלב 7 (BIOS), שלב 9 (פיתוח במחשב הראשי), שלב 10 (אנשים נוספים), טבלת התקלות בשלב 11 (את פקודות השרת מריצים ב-PowerShell), והצ'קליסט.
+
+> **ב-Windows Pro יש עוד אפשרות:** להריץ את מסלול Ubuntu בתוך מכונה וירטואלית של Hyper-V שמוגדרת לעלות עם המחשב (*Automatic Start Action: Always start*). כך אין צורך בכניסה אוטומטית, אבל צריך יותר זיכרון: לפחות 8GB, ועדיף 16GB.
