@@ -16,6 +16,8 @@ dist/
 
 # Runtime data
 /data/
+# Backups of the data volume: they hold the accounts and Telegram chats
+*.tgz
 *.db
 *.db-journal
 *.db-wal
