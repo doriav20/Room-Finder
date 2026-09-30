@@ -3,7 +3,14 @@
 <tr>
   <td>
     <div class="fw-semibold">{{ row.label }}</div>
-    <a class="small" href="{{ row.search_url }}" target="_blank" rel="noopener noreferrer">החיפוש באתר ↗</a>
+    {% if row.search_url %}
+    <div class="small text-nowrap">
+      <a href="{{ row.search_url }}" target="_blank" rel="noopener noreferrer"
+         title="{% if row.state.custom_url %}הכתובת המותאמת{% else %}החיפוש באתר עם הסינונים מההגדרות{% endif %}">החיפוש באתר ↗</a>
+      <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-link="{{ row.search_url }}"
+              title="העתק את הקישור" onclick="navigator.clipboard.writeText(this.dataset.link).then(() => this.textContent = '✔ הועתק')">העתק</button>
+    </div>
+    {% endif %}
   </td>
   <td>
     {% if row.running %}<span class="spinner-border spinner-border-sm text-primary"></span> בודק…

@@ -2,9 +2,13 @@ import json
 import re
 from datetime import timedelta
 
+from markupsafe import escape
+
 from conftest import add_listing
 from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, PriceChange, Setting
+from roomfinder.schemas import SearchCriteria
+from roomfinder.sources import build_sources
 
 
 def test_listings_page_opens_on_new_listings(client, db):
@@ -143,8 +147,16 @@ def test_sources_page_and_source_settings(client):
 
     assert "הפעל" in toggled.text  # the source is now off
     assert 'value="15"' in saved.text
+    assert 'data-link="https://www.yad2.co.il/realestate/rent"' in saved.text
     bad = client.post("/sources/yad2/settings", data={"interval_minutes": "1"})
     assert bad.status_code == 400
+
+
+def test_sources_page_links_to_each_search_with_the_filters(client):
+    page = client.get("/sources").text
+
+    for source in build_sources().values():
+        assert f'data-link="{escape(source.search_url(SearchCriteria()))}"' in page
 
 
 def test_unknown_sources_are_not_found(client):

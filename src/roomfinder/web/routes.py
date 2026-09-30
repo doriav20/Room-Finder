@@ -471,7 +471,8 @@ class SourceRow:
     label: str
     state: SourceState
     running: bool
-    search_url: str
+    # The site's search page with the criteria as its own filters (or the custom URL)
+    search_url: str | None
     default_interval: int
     active: int
     matching: int
@@ -484,7 +485,7 @@ async def _source_row(request: Request, session: AsyncSession, name: str) -> Sou
     try:
         search_url = state.custom_url or source.search_url(await get_criteria(session))
     except SourceError:
-        search_url = "#"
+        search_url = None
     return SourceRow(
         name=name,
         label=source.label,
