@@ -8,8 +8,10 @@ from roomfinder.sources import madlan
 from roomfinder.sources.base import BlockedError, SourceError
 from roomfinder.sources.madlan import (
     MadlanSource,
+    page_variables,
     parse_poi,
     parse_ssr_context,
+    search_list,
     search_results,
     search_url,
 )
@@ -54,14 +56,30 @@ AGENT_BULLETIN = BULLETIN | {
 PROJECT = {"id": "some_project", "type": "project", "projectName": "פרויקט"}
 
 
+VARIABLES = {
+    "dealType": "unitRent",
+    "roomsRange": [4, 4],
+    "limit": 50,
+    "offset": 0,
+    "cursor": {"seenProjects": None, "bulletinsOffset": 0},
+    "listingEdited": None,
+}
+
+
 def page_html(pois, total) -> str:
     context = {
         "initialPath": "/for-rent/x",
         "reduxInitialState": {
             "domainData": {
                 "searchList": {
-                    "data": {"searchPoiV2": {"total": total, "poi": pois}},
-                    "meta": {"variables": {"offset": 0, "limit": 50}},
+                    "data": {
+                        "searchPoiV2": {
+                            "total": total,
+                            "cursor": {"bulletinsOffset": 49, "seenProjects": ["p1"]},
+                            "poi": pois,
+                        }
+                    },
+                    "meta": {"variables": VARIABLES},
                 }
             }
         },
@@ -72,10 +90,17 @@ def page_html(pois, total) -> str:
     return f"<html><body><script>window.__SSR_HYDRATED_CONTEXT__={raw};</script></body></html>"
 
 
+def api_page(pois, total, bulletins_offset=99):
+    result = {"total": total, "cursor": {"bulletinsOffset": bulletins_offset}, "poi": pois}
+    return {"status": 200, "body": json.dumps({"data": {"searchPoiV2": result}})}
+
+
 class FakePage:
-    def __init__(self, pages: list[str]) -> None:
+    def __init__(self, pages: list[str], api_responses=()) -> None:
         self.pages = list(pages)
+        self.api_responses = list(api_responses)
         self.visited: list[str] = []
+        self.api_calls: list[dict] = []
         self._html = ""
 
     async def goto(self, url, **kwargs):
@@ -84,6 +109,10 @@ class FakePage:
 
     async def content(self):
         return self._html
+
+    async def evaluate(self, script, arg):
+        self.api_calls.append(arg)
+        return self.api_responses.pop(0)
 
 
 @pytest.fixture(autouse=True)
@@ -95,10 +124,12 @@ def no_pauses(monkeypatch):
 
 
 def test_embedded_context_with_undefined_is_parsed():
-    pois, total = search_results(parse_ssr_context(page_html([BULLETIN, PROJECT], 2)))
+    result, variables = search_list(parse_ssr_context(page_html([BULLETIN, PROJECT], 2)))
+    pois, total = search_results(result)
 
     assert total == 2
     assert [poi["id"] for poi in pois] == ["uamRPJPrKMD", "some_project"]
+    assert variables["roomsRange"] == [4, 4]
 
 
 def test_missing_context_is_an_error():
@@ -141,24 +172,69 @@ def test_agent_bulletin_and_projects():
     assert parse_poi(PROJECT) is None
 
 
-def test_search_urls():
-    rishon = "https://www.madlan.co.il/for-rent/%D7%A8%D7%90%D7%A9%D7%95%D7%9F-%D7%9C%D7%A6%D7%99%D7%95%D7%9F-%D7%99%D7%A9%D7%A8%D7%90%D7%9C"
+RISHON = "https://www.madlan.co.il/for-rent/%D7%A8%D7%90%D7%A9%D7%95%D7%9F-%D7%9C%D7%A6%D7%99%D7%95%D7%9F-%D7%99%D7%A9%D7%A8%D7%90%D7%9C"
 
-    assert search_url(SearchCriteria()) == rishon + "/4-bd"
-    assert search_url(SearchCriteria(), 2) == rishon + "/4-bd?page=2"
-    assert search_url(SearchCriteria(rooms_min=4, rooms_max=4.5)) == rishon
+
+def test_search_url_has_the_filters():
+    types = "flat,gardenApartment,duplex,penthouse,attic"
+    assert search_url(SearchCriteria()) == f"{RISHON}?filters=__4-4___{types}{'_' * 13}"
+
+    every_type = SearchCriteria(
+        rooms_min=4, rooms_max=4.5, price_max=7000, property_types=list(PropertyType)
+    )
+    assert search_url(every_type) == f"{RISHON}?filters=_-7000_4-4.5{'_' * 16}"
+    assert "_3000-_" in search_url(SearchCriteria(price_min=3000))
+
+
+def test_types_without_a_filter_on_the_site_read_every_type():
+    criteria = SearchCriteria(property_types=[PropertyType.APARTMENT, PropertyType.STUDIO])
+
+    assert search_url(criteria) == f"{RISHON}?filters=__4-4{'_' * 16}"
+
+
+def test_unknown_city():
     with pytest.raises(SourceError):
         search_url(SearchCriteria(city="אילת"))
 
 
-async def test_fetch_reads_every_page():
-    page = FakePage([page_html([BULLETIN, PROJECT], 60), page_html([AGENT_BULLETIN], 60)])
+def test_page_variables_follow_the_previous_page():
+    variables = page_variables(
+        VARIABLES, {"cursor": {"bulletinsOffset": 49, "seenProjects": ["p1"]}}, 2
+    )
+
+    assert variables["offset"] == 50
+    assert variables["cursor"] == {"seenProjects": ["p1"], "bulletinsOffset": 49}
+    assert variables["roomsRange"] == [4, 4]
+    assert "listingEdited" not in variables  # not a variable of the query
+
+
+async def test_fetch_reads_the_following_pages_from_the_api():
+    page = FakePage(
+        [page_html([BULLETIN, PROJECT], 120)],
+        [api_page([AGENT_BULLETIN], 120, 99), api_page([BULLETIN | {"id": "third"}], 120, 149)],
+    )
 
     result = await MadlanSource().fetch(page, SearchCriteria(), None)
 
-    assert page.visited == [search_url(SearchCriteria()), search_url(SearchCriteria(), 2)]
-    assert [listing.source_id for listing in result.listings] == ["uamRPJPrKMD", "XKjHvmv06I7"]
+    assert page.visited == [search_url(SearchCriteria())]
+    assert [call["variables"]["offset"] for call in page.api_calls] == [50, 100]
+    assert [call["variables"]["cursor"]["bulletinsOffset"] for call in page.api_calls] == [49, 99]
+    assert "searchPoiV2(" in page.api_calls[0]["query"]
+    assert [listing.source_id for listing in result.listings] == [
+        "uamRPJPrKMD",
+        "XKjHvmv06I7",
+        "third",
+    ]
     assert result.complete is True
+
+
+async def test_fetch_uses_the_custom_url():
+    page = FakePage([page_html([BULLETIN], 1)])
+
+    await MadlanSource().fetch(page, SearchCriteria(), "https://www.madlan.co.il/for-rent/x")
+
+    assert page.visited == ["https://www.madlan.co.il/for-rent/x"]
+    assert page.api_calls == []
 
 
 async def test_bot_check_on_first_page_is_blocked():
@@ -168,10 +244,28 @@ async def test_bot_check_on_first_page_is_blocked():
         await MadlanSource().fetch(page, SearchCriteria(), None)
 
 
-async def test_bot_check_on_a_later_page_keeps_what_was_read():
-    page = FakePage([page_html([BULLETIN], 60), '<div id="px-captcha"></div>'])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status": 403, "body": '<html><div id="px-captcha"></div></html>'},
+        {"status": 500, "body": "oops"},
+        {"status": 200, "body": '{"errors": [{"message": "bad variable"}], "data": null}'},
+    ],
+)
+async def test_a_failing_api_keeps_the_first_page(answer):
+    page = FakePage([page_html([BULLETIN], 60)], [answer])
 
     result = await MadlanSource().fetch(page, SearchCriteria(), None)
 
     assert [listing.source_id for listing in result.listings] == ["uamRPJPrKMD"]
+    assert result.complete is False
+
+
+async def test_too_many_pages_is_incomplete(monkeypatch):
+    monkeypatch.setattr(madlan, "MAX_PAGES", 1)
+    page = FakePage([page_html([BULLETIN], 60)])
+
+    result = await MadlanSource().fetch(page, SearchCriteria(), None)
+
+    assert page.api_calls == []
     assert result.complete is False
