@@ -32,6 +32,8 @@
 - **מסלול Ubuntu Server:** שלבים 1-11 כאן למטה.
 - **מסלול Windows:** [בסוף המדריך](#מסלול-windows). מתאים אם במחשב הישן יש Windows 11 ולא רוצים למחוק אותו.
 
+**בלי מחשב נוסף, על דומיין משלך:** אפשר גם להשאיר את המערכת במחשב הראשי, ולפתוח את הדשבורד בכתובת כמו `https://roomfinder.example.com`. ראו [דומיין משלך עם Cloudflare Tunnel](#דומיין-משלך-עם-cloudflare-tunnel). המחיר: כשהמחשב כבוי או ישן, המעקב והדשבורד לא עובדים.
+
 ## מה צריך
 
 - **המחשב הישן:**
@@ -344,7 +346,7 @@ docker compose start
   1. בלוח הבקרה, ליד השרת, בוחרים **⋯ ← Share** ושולחים את הקישור.
   2. האדם פותח חשבון Tailscale משלו, ורואה רק את השרת הזה.
   3. אחר כך שולחים לו קישור הזמנה מדף **משתמשים** בדשבורד.
-- לא להשתמש ב-*Tailscale Funnel* ולא לפתוח פורט בראוטר. שתי האפשרויות חושפות את הדשבורד לכל האינטרנט.
+- לא להשתמש ב-*Tailscale Funnel* ולא לפתוח פורט בראוטר. שתי האפשרויות חושפות את הדשבורד לכל האינטרנט. מי שרוצה גישה בלי Tailscale: [דומיין משלך עם Cloudflare Tunnel](#דומיין-משלך-עם-cloudflare-tunnel), עם Cloudflare Access.
 - ההתראות בטלגרם מגיעות גם בלי Tailscale. צריך אותו רק כדי לפתוח את הדשבורד.
 
 ## 11. תקלות נפוצות
@@ -522,3 +524,97 @@ docker compose start
 **מה עוד חל גם על Windows:** שלב 7 (BIOS), שלב 9 (פיתוח במחשב הראשי), שלב 10 (אנשים נוספים), טבלת התקלות בשלב 11 (את פקודות השרת מריצים ב-PowerShell), והצ'קליסט.
 
 > **ב-Windows Pro יש עוד אפשרות:** להריץ את מסלול Ubuntu בתוך מכונה וירטואלית של Hyper-V שמוגדרת לעלות עם המחשב (*Automatic Start Action: Always start*). כך אין צורך בכניסה אוטומטית, אבל צריך יותר זיכרון: לפחות 8GB, ועדיף 16GB.
+
+---
+
+## דומיין משלך עם Cloudflare Tunnel
+
+המסלול הזה פותח את הדשבורד בכתובת על דומיין שלך, למשל `https://roomfinder.example.com`, מכל מכשיר ובלי אפליקציה. הוא עובד בכל מחשב שמריץ את המערכת: המחשב הראשי, או השרת מהמסלולים שלמעלה.
+
+```
+טלפון / מחשב ──(HTTPS)──▶ Cloudflare ◀──(חיבור יוצא)── קונטיינר tunnel ──▶ app:8000 ──▶ RoomFinder
+```
+
+- **בלי לגעת בראוטר:** הקונטיינר `tunnel` יוצר חיבור **יוצא** ל-Cloudflare, כמו כל גלישה רגילה. לא פותחים פורט, וכתובת ה-IP של הבית לא נחשפת ולא משנה.
+- **עולה ויורד עם המערכת:** `docker compose up -d` מעלה גם אותו, ו-`docker compose down` מוריד גם אותו. כשהמערכת למטה, מי שנכנס לכתובת רואה דף שגיאה של Cloudflare.
+- **הסריקות לא משתנות:** רק התעבורה אל הדשבורד עוברת דרך Cloudflare. יד2 ומדלן ממשיכים לראות את הכתובת הביתית.
+
+**מה צריך לדעת:**
+- **ה-DNS של כל הדומיין עובר לניהול ב-Cloudflare.** הדומיין נשאר רשום אצל הרשם (החברה שממנה קנית אותו), אבל אם יש לו רשומות אחרות, כמו מייל או אתר, צריך לוודא שהן הועתקו ל-Cloudflare (סעיף T1).
+- **Cloudflare יושב באמצע:** הם מפענחים את התעבורה לדשבורד, כי הם אלה שמספקים את ה-HTTPS.
+- **הדשבורד נגיש לכל האינטרנט.** לכן סעיף T4 (Cloudflare Access) הוא חובה, לא המלצה.
+
+### T1. העברת ה-DNS ל-Cloudflare
+
+1. לפתוח חשבון חינמי ב-https://dash.cloudflare.com, ולבחור **Add a domain** (או *Add a site*) עם הדומיין שלך ותוכנית **Free**.
+2. Cloudflare סורק את רשומות ה-DNS הקיימות ומציג אותן. להשוות לרשימה בפאנל של הרשם. מה שחסר (בעיקר רשומות `MX` ו-`TXT` של מייל) מוסיפים ידנית.
+3. Cloudflare מציג שני **Nameservers**, למשל `ada.ns.cloudflare.com`.
+4. **בפאנל של הרשם**, בהגדרות הדומיין, למצוא את *Nameservers* (לפעמים *Name Servers* או *DNS servers*) ולבחור בשרתים מותאמים אישית (*custom*). להחליף את ה-Nameservers הקיימים בשניים של Cloudflare, ולשמור.
+5. לחכות למייל מ-Cloudflare שהדומיין פעיל. בדרך כלל זה לוקח פחות משעה, ולפעמים עד יום.
+
+### T2. יצירת המנהרה
+
+1. ב-Cloudflare: **Zero Trust** (בתפריט הצד). בפעם הראשונה בוחרים שם לארגון ואת תוכנית ה-**Free**.
+2. **Networks ← Tunnels ← Create a tunnel**, מסוג **Cloudflared**. שם: `roomfinder`.
+3. במסך ההתקנה בוחרים **Docker**. מופיעה פקודה שמסתיימת ב-`--token eyJ...`. **לא מריצים אותה.** מעתיקים רק את ה-token, מה שאחרי `--token`.
+4. בשלב הבא (*Public Hostname* / *Route traffic*):
+   - **Subdomain:** `roomfinder`
+   - **Domain:** הדומיין שלך
+   - **Service:** סוג `HTTP`, כתובת `app:8000`
+
+   כתובת היעד היא `app:8000` ולא `localhost:8000`: בתוך קונטיינר, `localhost` הוא הקונטיינר עצמו, ו-`app` הוא השם של RoomFinder ברשת של Docker.
+
+### T3. הגדרה והפעלה
+
+ב-`.env`, עם הדומיין שלך וה-token מ-T2:
+
+```
+DASHBOARD_URL=https://roomfinder.example.com
+ALLOWED_HOSTS=["roomfinder.example.com"]
+COOKIE_SECURE=true
+COMPOSE_PROFILES=tunnel
+CLOUDFLARE_TUNNEL_TOKEN=eyJ...
+```
+
+- `COMPOSE_PROFILES=tunnel`: בלי השורה הזו הקונטיינר `tunnel` לא עולה. כך מי שמריץ את הפרויקט בלי מנהרה (פיתוח, או מסלול Tailscale) לא צריך לשנות כלום.
+- **ה-token סודי:** מי שמחזיק אותו יכול להגיש תוכן בכתובת שלך. אם הוא דלף: ב-Zero Trust ← Tunnels ← המנהרה ← *Refresh token*, ולהחליף ב-`.env`.
+- משתמשים גם ב-Tailscale? אפשר לשים את שתי הכתובות ב-`ALLOWED_HOSTS`: `["roomfinder.example.com", "roomfinder.TAILNET"]`. ב-`DASHBOARD_URL` שמים את זו שבה משתמשים הכי הרבה.
+
+הפעלה:
+
+```powershell
+docker compose up -d
+docker compose logs -f tunnel   # צריך לראות "Registered tunnel connection". Ctrl+C כדי לצאת
+```
+
+בלוח הבקרה של Cloudflare, המנהרה אמורה להופיע כ-**Healthy**.
+
+### T4. Cloudflare Access: רק אתה נכנס
+
+בלי השלב הזה, כל אחד באינטרנט מגיע לדף הכניסה של הדשבורד. עם Access, Cloudflare שואל קודם לכתובת מייל, ושולח אליה קוד. רק כתובות שאישרת עוברות, ורק אחר כך מופיע דף הכניסה של RoomFinder.
+
+1. ב-Zero Trust: **Access ← Applications ← Add an application ← Self-hosted**.
+2. **Application name:** `RoomFinder`. **Public hostname:** `roomfinder` בדומיין שלך.
+3. **Policy:** שם `Allowed`, פעולה **Allow**, ובכלל **Include ← Emails** לכתוב את כתובות המייל שמותר להן להיכנס (שלך, ושל מי שהזמנת).
+4. **Login methods:** להשאיר את **One-time PIN**.
+5. **Session duration:** למשל `1 month`, כדי שלא יבקש קוד כל יום.
+6. לשמור.
+
+**בדיקה:** בחלון גלישה בסתר לפתוח את `https://roomfinder.example.com`. צריך להופיע קודם מסך של Cloudflare שמבקש מייל, ורק אחרי הקוד דף הכניסה של RoomFinder.
+
+**אנשים נוספים:** מוסיפים את המייל שלהם ל-Policy (Access ← Applications ← RoomFinder ← Policies), ושולחים להם קישור הזמנה מדף **משתמשים** בדשבורד. לא צריך Tailscale.
+
+### T5. אם זה המחשב הראשי
+
+- **שינה:** כשהמחשב נכנס לשינה, גם המעקב נעצר. כדי שירוץ כל עוד המחשב בחשמל: `powercfg /change standby-timeout-ac 0`.
+- **מצב פיתוח:** `docker compose -f compose.yaml -f compose.dev.yaml up -d` מעלה גם את המנהרה, כך שהגרסה שבפיתוח היא זו שנגישה בכתובת. כדי לעבוד בלי מנהרה: `docker compose stop tunnel`.
+
+### תקלות
+
+| מה רואים | מה לעשות |
+|---|---|
+| דף שגיאה של Cloudflare (502 / *Bad gateway*) | המערכת לא רצה. `docker compose ps`, ואם צריך `docker compose up -d`. |
+| *Error 1033* | המנהרה לא מחוברת. `docker compose logs tunnel`, ולוודא ש-`COMPOSE_PROFILES=tunnel` וה-token נכונים ב-`.env`. |
+| `Invalid host header` | הכתובת לא מופיעה ב-`ALLOWED_HOSTS`. לתקן את `.env` ולהריץ `docker compose up -d`. |
+| הכתובת לא נמצאת בכלל | ה-Nameservers עוד לא התעדכנו (T1), או שה-*Public Hostname* לא הוגדר (T2). |
+| המייל של הדומיין הפסיק לעבוד | רשומות `MX`/`TXT` לא הועתקו ל-Cloudflare. להעתיק אותן מהפאנל של הרשם (T1). |
