@@ -68,6 +68,19 @@ def no_pauses(monkeypatch):
     monkeypatch.setattr(yad2, "human_pause", instant)
 
 
+def api_page1(*extra):
+    """The API's first page: the search page's own listings, split into private and agency."""
+    feed = load("yad2_page_props.json")["feed"]
+    items = feed["yad2"] + list(extra)
+    data = {
+        "private": [item for item in items if item["adType"] == "private"],
+        "agency": [item for item in items if item["adType"] != "private"],
+        "platinum": feed["platinum"],
+        "pagination": feed["pagination"],
+    }
+    return {"status": 200, "body": json.dumps({"data": data}, ensure_ascii=False)}
+
+
 def api_page2():
     return {"status": 200, "body": (FIXTURES / "yad2_api_page2.json").read_text(encoding="utf-8")}
 
@@ -170,14 +183,15 @@ def test_parse_next_data_requires_the_script():
 
 
 async def test_fetch_reads_all_pages_and_removes_repeats():
-    page = FakePage(page_html(load("yad2_page_props.json")), [api_page2()])
+    page = FakePage(page_html(load("yad2_page_props.json")), [api_page1(), api_page2()])
 
     result = await Yad2Source().fetch(page, SearchCriteria(), None)
 
     assert page.visited == [Yad2Source().search_url(SearchCriteria())]
+    feed_api = "https://gw.yad2.co.il/realestate-feed/rent/feed"
     assert page.api_urls == [
-        "https://gw.yad2.co.il/realestate-feed/rent/feed"
-        "?city=8300&area=9&region=1&minRooms=4&maxRooms=4&page=2"
+        f"{feed_api}?city=8300&area=9&region=1&minRooms=4&maxRooms=4&page=1",
+        f"{feed_api}?city=8300&area=9&region=1&minRooms=4&maxRooms=4&page=2",
     ]
     assert sorted(listing.source_id for listing in result.listings) == [
         "tok00001",
@@ -191,15 +205,44 @@ async def test_fetch_reads_all_pages_and_removes_repeats():
 async def test_fetch_uses_the_custom_url():
     props = copy.deepcopy(load("yad2_page_props.json"))
     props["feed"]["pagination"] = {"total": 3, "totalPages": 1}
-    page = FakePage(page_html(props))
+    page = FakePage(page_html(props), [api_page1()])
 
     await Yad2Source().fetch(page, SearchCriteria(), "https://www.yad2.co.il/realestate/rent?x=1")
 
     assert page.visited == ["https://www.yad2.co.il/realestate/rent?x=1"]
-    assert page.api_urls == []
+    assert len(page.api_urls) == 1
+
+
+async def test_the_api_first_page_adds_what_the_search_page_left_for_later():
+    # The search page mixes private and agency listings in its own order, so a listing the
+    # API has on its first page may not be on the search page's first page
+    props = copy.deepcopy(load("yad2_page_props.json"))
+    props["feed"]["pagination"] = {"total": 4, "totalPages": 1}
+    later = copy.deepcopy(props["feed"]["yad2"][0]) | {"token": "tok00005"}
+    page = FakePage(page_html(props), [api_page1(later)])
+
+    result = await Yad2Source().fetch(page, SearchCriteria(), None)
+
+    assert "tok00005" in {listing.source_id for listing in result.listings}
+    assert result.complete is True
 
 
 async def test_blocked_later_page_keeps_the_first_page():
+    page = FakePage(
+        page_html(load("yad2_page_props.json")), [api_page1(), {"status": 403, "body": "no"}]
+    )
+
+    result = await Yad2Source().fetch(page, SearchCriteria(), None)
+
+    assert result.complete is False
+    assert {listing.source_id for listing in result.listings} == {
+        "tok00001",
+        "tok00002",
+        "tok00003",
+    }
+
+
+async def test_blocked_api_keeps_the_search_page_listings():
     page = FakePage(page_html(load("yad2_page_props.json")), [{"status": 403, "body": "no"}])
 
     result = await Yad2Source().fetch(page, SearchCriteria(), None)
@@ -210,6 +253,16 @@ async def test_blocked_later_page_keeps_the_first_page():
         "tok00002",
         "tok00003",
     }
+
+
+async def test_too_many_pages_is_incomplete(monkeypatch):
+    monkeypatch.setattr(yad2, "MAX_PAGES", 1)
+    page = FakePage(page_html(load("yad2_page_props.json")), [api_page1()])
+
+    result = await Yad2Source().fetch(page, SearchCriteria(), None)
+
+    assert len(page.api_urls) == 1
+    assert result.complete is False
 
 
 async def test_bot_check_page_raises_blocked():

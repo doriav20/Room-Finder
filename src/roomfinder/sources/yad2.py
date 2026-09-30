@@ -1,8 +1,10 @@
 """Yad2 (yad2.co.il), Israel's largest classifieds site.
 
 Yad2 sits behind Radware's bot manager, which turns plain HTTP clients away. So the search
-page is opened in the real browser, the first page of results is read from the Next.js data
-embedded in it, and the following pages come from the JSON API that the site itself calls.
+page is opened in the real browser, and every page of results, the first one included, is
+read from the JSON API that the site itself calls. The page's own first page (the Next.js data
+embedded in it) mixes private and agency listings differently from the API's first page, so
+it isn't enough by itself.
 """
 
 import json
@@ -52,8 +54,9 @@ AMENITY_FLAGS = {
     "isPetsAllowed": "חיות מחמד",
 }
 
-# Buckets in a feed page that hold listings; the others (trio, kingOfTheHar...) advertise agencies
-LISTING_BUCKETS = ("private", "agency", "platinum", "booster")
+# Buckets in a feed page that hold listings; the others (trio, kingOfTheHar...) advertise agencies.
+# The search page holds its regular listings in "yad2", the API splits them into private/agency
+LISTING_BUCKETS = ("yad2", "private", "agency", "platinum", "booster")
 
 CITIES: dict[str, dict[str, Any]] = {
     "ראשון לציון": {"region": 1, "region_slug": "center-and-sharon", "area": 9, "city": 8300},
@@ -275,7 +278,9 @@ class Yad2Source(Source):
         pages = total_pages(feed)
         params = feed_api_params(page_props, criteria)
         complete = pages <= MAX_PAGES
-        for number in range(2, min(pages, MAX_PAGES) + 1):
+        if not complete:
+            log.warning("Yad2 has %d pages of results, reading only %d", pages, MAX_PAGES)
+        for number in range(1, min(pages, MAX_PAGES) + 1):
             await human_pause(1.5, 4.0)
             try:
                 listings.extend(parse_feed(await self._api_page(page, params, number)))

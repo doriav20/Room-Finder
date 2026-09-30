@@ -4,7 +4,7 @@
     {"city": "8300", "area": "9", "region": "1", "minRooms": "4", "maxRooms": "4"}
   ],
   "feed": {
-    "private": [
+    "yad2": [
       {
         "address": {
           "region": {"text": "מרכז והשרון", "id": 1},
@@ -51,9 +51,7 @@
         "additionalDetails": {"property": {"text": "דירת גן"}, "roomsCount": 4},
         "metaData": {"coverImage": "https://img.yad2.co.il/Pic/2a.jpeg"},
         "tags": []
-      }
-    ],
-    "agency": [
+      },
       {
         "address": {
           "city": {"text": "ראשון לציון"},
