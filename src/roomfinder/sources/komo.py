@@ -1,7 +1,13 @@
-"""Komo (komo.co.il) - a classifieds board with plain server-rendered result pages."""
+"""Komo (komo.co.il) - a classifieds board with plain server-rendered result pages.
 
+Only the first page of results is open to visitors; the next ones ask to sign in. So when a
+search has more than one page, it is split by price into narrower searches until each one
+fits on its first page.
+"""
+
+import logging
 import re
-from urllib.parse import urlencode, urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Page
@@ -18,10 +24,13 @@ from roomfinder.normalize import (
 from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
 from roomfinder.sources.base import FetchResult, Source, SourceError, human_pause
 
+log = logging.getLogger(__name__)
+
 SITE = "https://www.komo.co.il"
 SEARCH_PATH = "/code/nadlan/apartments-for-rent.asp"
 DETAILS_URL = SITE + "/code/nadlan/details/?modaaNum={id}"
-MAX_PAGES = 10
+# Result pages loaded per run, each one the first page of a narrower price range
+MAX_SEARCHES = 15
 
 # Amenity items on a listing page (by CSS class), besides furniture and parking
 AMENITIES = {
@@ -55,6 +64,48 @@ def search_params(criteria: SearchCriteria) -> dict[str, str]:
     if criteria.private_only:
         params["privateOnly"] = "1"
     return params
+
+
+def price_range(url: str) -> tuple[int | None, int | None]:
+    """The price range a search URL asks for (None where it's open)."""
+    params = dict(parse_qsl(urlsplit(url).query))
+    low, high = parse_int(params.get("fromPrice")), parse_int(params.get("toPrice"))
+    return low or None, high or None
+
+
+def with_price_range(url: str, low: int | None, high: int | None) -> str:
+    parts = urlsplit(url)
+    params = [
+        (name, value)
+        for name, value in parse_qsl(parts.query, keep_blank_values=True)
+        if name not in ("fromPrice", "toPrice", "currPage")
+    ]
+    if low is not None:
+        params.append(("fromPrice", str(low)))
+    if high is not None:
+        params.append(("toPrice", str(high)))
+    return urlunsplit(parts._replace(query=urlencode(params)))
+
+
+def split_price(listings: list[ListingData], low: int | None, high: int | None) -> int | None:
+    """A price that splits a range with too many listings in two: the median of the listings
+    seen in it. None when the range can't be split (it's a single price)."""
+    floor = low or 0
+    if high is not None and floor >= high:
+        return None
+    prices = sorted(
+        listing.price
+        for listing in listings
+        if listing.price and floor <= listing.price and (high is None or listing.price <= high)
+    )
+    if prices:
+        split = prices[(len(prices) - 1) // 2]
+    elif high is not None:
+        split = (floor + high) // 2
+    else:
+        return None
+    # Both halves must be narrower than the range itself: [floor, split] and [split + 1, high]
+    return max(floor, split if high is None else min(split, high - 1))
 
 
 def _split_title(title: str) -> tuple[str | None, str | None, str | None, str | None]:
@@ -186,17 +237,29 @@ class KomoSource(Source):
     ) -> FetchResult:
         base_url = custom_url or self.search_url(criteria)
         listings: dict[str, ListingData] = {}
-        for number in range(1, MAX_PAGES + 1):
-            if number > 1:
+        ranges = [price_range(base_url)]
+        complete = True
+        for number in range(MAX_SEARCHES):
+            if not ranges:
+                break
+            if number:
                 await human_pause(2.0, 5.0)
-            separator = "&" if "?" in base_url else "?"
-            url = base_url if number == 1 else f"{base_url}{separator}currPage={number}"
+            low, high = ranges.pop(0)
+            url = base_url if number == 0 else with_price_range(base_url, low, high)
             response = await page.goto(url, wait_until="domcontentloaded")
             if response is not None and response.status >= 400:
                 raise SourceError(f"Komo answered {response.status}")
             found, has_next = parse_page(await page.content())
-            new = [listing for listing in found if listing.source_id not in listings]
-            listings.update((listing.source_id, listing) for listing in new)
-            if not has_next or not new:
-                return FetchResult(list(listings.values()), complete=True)
-        return FetchResult(list(listings.values()), complete=False)
+            listings.update((listing.source_id, listing) for listing in found)
+            if not has_next:
+                continue
+            split = split_price(found, low, high)
+            if split is None:
+                log.warning("Komo has more than a page of listings at %s-%s", low, high)
+                complete = False
+                continue
+            ranges += [(low, split), (split + 1, high)]
+        if ranges:
+            log.warning("Komo still had %d price ranges to read", len(ranges))
+            complete = False
+        return FetchResult(list(listings.values()), complete=complete)

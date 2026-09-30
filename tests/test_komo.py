@@ -4,7 +4,15 @@ import pytest
 
 from roomfinder.schemas import PropertyType, SearchCriteria
 from roomfinder.sources import komo
-from roomfinder.sources.komo import KomoSource, parse_details, parse_page, search_params
+from roomfinder.sources.komo import (
+    KomoSource,
+    parse_details,
+    parse_page,
+    price_range,
+    search_params,
+    split_price,
+    with_price_range,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -118,13 +126,16 @@ def test_search_params():
     }
 
 
-async def test_fetch_follows_pages():
-    page = FakePage([fixture("komo_page1.html"), fixture("komo_page2.html")])
+async def test_a_search_with_more_pages_is_split_by_price():
+    # Only the first page is open without signing in, so each half is read from its first page
+    page = FakePage(
+        [fixture("komo_page1.html"), fixture("komo_page2.html"), fixture("komo_page2.html")]
+    )
 
     result = await KomoSource().fetch(page, SearchCriteria(), None)
 
-    assert len(page.visited) == 2
-    assert page.visited[1].endswith("&currPage=2")
+    base = KomoSource().search_url(SearchCriteria())
+    assert page.visited == [base, base + "&toPrice=6200", base + "&fromPrice=6201"]
     assert [listing.source_id for listing in result.listings] == [
         "1000001",
         "1000002",
@@ -132,3 +143,73 @@ async def test_fetch_follows_pages():
         "1000004",
     ]
     assert result.complete is True
+
+
+async def test_a_single_page_search_is_read_once():
+    page = FakePage([fixture("komo_page2.html")])
+
+    result = await KomoSource().fetch(page, SearchCriteria(), None)
+
+    assert len(page.visited) == 1
+    assert result.complete is True
+
+
+async def test_a_split_keeps_the_price_range_of_the_search():
+    page = FakePage([fixture("komo_page1.html"), fixture("komo_page2.html")] + [""] * 2)
+    custom = "https://www.komo.co.il/code/nadlan/apartments-for-rent.asp?nehes=1&fromPrice=5000&toPrice=9000"
+
+    await KomoSource().fetch(page, SearchCriteria(), custom)
+
+    assert page.visited[1:] == [
+        "https://www.komo.co.il/code/nadlan/apartments-for-rent.asp?nehes=1&fromPrice=5000&toPrice=6200",
+        "https://www.komo.co.il/code/nadlan/apartments-for-rent.asp?nehes=1&fromPrice=6201&toPrice=9000",
+    ]
+
+
+async def test_more_than_a_page_at_one_price_is_incomplete():
+    page = FakePage([fixture("komo_page1.html")])
+    criteria = SearchCriteria(price_min=6200, price_max=6200)
+
+    result = await KomoSource().fetch(page, criteria, None)
+
+    assert len(page.visited) == 1
+    assert result.complete is False
+
+
+async def test_running_out_of_searches_is_incomplete(monkeypatch):
+    monkeypatch.setattr(komo, "MAX_SEARCHES", 1)
+    page = FakePage([fixture("komo_page1.html")])
+
+    result = await KomoSource().fetch(page, SearchCriteria(), None)
+
+    assert len(page.visited) == 1
+    assert result.complete is False
+
+
+def test_price_range_of_a_url():
+    assert price_range("https://x/?nehes=1&fromPrice=3000&toPrice=8000") == (3000, 8000)
+    assert price_range("https://x/?nehes=1&toPrice=8000") == (None, 8000)
+    assert price_range("https://x/?nehes=1") == (None, None)
+
+
+def test_with_price_range_replaces_the_range_and_the_page():
+    url = "https://x/a.asp?nehes=1&fromPrice=3000&currPage=2&toPrice=9000"
+
+    assert (
+        with_price_range(url, 3000, 6000) == "https://x/a.asp?nehes=1&fromPrice=3000&toPrice=6000"
+    )
+    assert with_price_range(url, None, 6000) == "https://x/a.asp?nehes=1&toPrice=6000"
+
+
+def test_split_price():
+    listings = parse_page(fixture("komo_page1.html"))[0]  # 11900, 6200 and no price
+
+    assert split_price(listings, None, None) == 6200
+    assert split_price(listings, 7000, None) == 11900
+    # Nothing seen inside the range: split it in the middle
+    assert split_price(listings, 7000, 9000) == 8000
+    # The split is always inside the range, so both halves are narrower
+    assert split_price(listings, 6200, 6300) == 6200
+    assert split_price(listings, 5000, 6200) == 6199
+    assert split_price(listings, 6200, 6200) is None
+    assert split_price(listings, 12000, None) is None
