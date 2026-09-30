@@ -37,6 +37,20 @@ PROPERTY_TYPES = {
     "semidetached": PropertyType.HOUSE,
 }
 
+# The site's property types, as its search page URL names them
+TYPE_SLUGS: dict[PropertyType, tuple[str, ...]] = {
+    PropertyType.APARTMENT: ("apartment",),
+    PropertyType.GARDEN: ("garden_apartment",),
+    PropertyType.DUPLEX: ("duplex", "triplex"),
+    PropertyType.PENTHOUSE: ("penthouse", "mini_penthouse", "rooftop_apartment"),
+    PropertyType.HOUSE: ("cottage", "villa"),
+    PropertyType.UNIT: ("housing_unit",),
+    PropertyType.STUDIO: ("studio", "loft"),
+    PropertyType.OTHER: ("room",),
+}
+# The search page's highest room choice, which stands for "6 or more"
+MAX_ROOMS_CHOICE = 6
+
 # Amenities in additional_info that are worth showing as tags (parking has its own field)
 FEATURES = {"elevator": "מעלית", "balcony": "מרפסת", "storage": "מחסן"}
 
@@ -54,6 +68,24 @@ def _room_values(criteria: SearchCriteria) -> list[str]:
         values.append(f"{rooms:g}")
         rooms += 0.5
     return values
+
+
+def search_url(criteria: SearchCriteria) -> str:
+    """The site's search page, e.g. .../rishon-letsiyon/price_0-8000/rooms_4/types_apartment"""
+    url = f"{SITE}/search/homes/rent/{_city_slug(criteria)}"
+    if criteria.price_min or criteria.price_max:
+        url += f"/price_{criteria.price_min or 0}"
+        if criteria.price_max:
+            url += f"-{criteria.price_max}"
+    # The page offers whole room counts, and 4 includes 3.5 and 4.5
+    low = max(1, min(int(criteria.rooms_min), MAX_ROOMS_CHOICE))
+    high = max(low, min(int(criteria.rooms_max), MAX_ROOMS_CHOICE))
+    url += "/rooms_" + ",".join(str(rooms) for rooms in range(low, high + 1))
+    if set(criteria.property_types) != set(PropertyType):
+        slugs = [slug for kind in criteria.property_types for slug in TYPE_SLUGS[kind]]
+        if slugs:
+            url += "/types_" + ",".join(slugs)
+    return url
 
 
 def api_url(criteria: SearchCriteria) -> str:
@@ -144,12 +176,7 @@ class OnMapSource(Source):
     night_interval_minutes = 60
 
     def search_url(self, criteria: SearchCriteria) -> str:
-        path = f"{SITE}/search/homes/rent/{_city_slug(criteria)}"
-        return (
-            f"{path}/rooms_{criteria.rooms_min:g}"
-            if criteria.rooms_min == criteria.rooms_max
-            else path
-        )
+        return search_url(criteria)
 
     async def fetch(
         self, page: Page, criteria: SearchCriteria, custom_url: str | None

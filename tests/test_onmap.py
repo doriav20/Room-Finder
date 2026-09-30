@@ -6,7 +6,7 @@ import pytest
 
 from roomfinder.schemas import PropertyType, SearchCriteria
 from roomfinder.sources.base import BlockedError, SourceError
-from roomfinder.sources.onmap import OnMapSource, api_url, parse_response
+from roomfinder.sources.onmap import OnMapSource, api_url, parse_response, search_url
 
 BODY = (Path(__file__).parent / "fixtures" / "onmap_search.json").read_text(encoding="utf-8")
 
@@ -74,6 +74,25 @@ def test_api_url_lists_every_half_room_in_range():
     assert url.startswith("https://phoenix.onmap.co.il/v1/properties/mixed_search?option=rent")
     assert "city=rishon-letsiyon" in url
     assert url.endswith("rooms%5B%5D=4&rooms%5B%5D=4.5&rooms%5B%5D=5")
+
+
+def test_search_url_for_default_criteria():
+    assert search_url(SearchCriteria()) == (
+        "https://www.onmap.co.il/search/homes/rent/rishon-letsiyon/rooms_4"
+        "/types_apartment,garden_apartment,duplex,triplex,penthouse,mini_penthouse,rooftop_apartment"
+    )
+
+
+def test_search_url_with_prices_rooms_and_every_type():
+    criteria = SearchCriteria(
+        rooms_min=3.5, rooms_max=5, price_max=8000, property_types=list(PropertyType)
+    )
+
+    assert search_url(criteria) == (
+        "https://www.onmap.co.il/search/homes/rent/rishon-letsiyon/price_0-8000/rooms_3,4,5"
+    )
+    assert search_url(SearchCriteria(price_min=3000)).split("/")[7] == "price_3000"
+    assert "/rooms_5,6/" in search_url(SearchCriteria(rooms_min=5, rooms_max=9))
 
 
 def test_unknown_city():
