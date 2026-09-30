@@ -1,9 +1,10 @@
 """Homeless (homeless.co.il) - an old classifieds board with a table of listings per city.
 
-The site's own filters only work through its search form, so all of the city's rentals
-are read (newest first) and the room count is filtered locally.
+The search filters go in the page's path, e.g. /rent/city=X$$inumber4=7$$inumber4_1=8 for
+4-4.5 rooms, and the following pages add /2, /3...
 """
 
+import logging
 import re
 from datetime import datetime
 from urllib.parse import quote, urljoin
@@ -24,6 +25,8 @@ from roomfinder.normalize import (
 from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
 from roomfinder.sources.base import FetchResult, Source, SourceError, human_pause
 
+log = logging.getLogger(__name__)
+
 SITE = "https://www.homeless.co.il"
 AD_URL = SITE + "/rent/viewad,{id}.aspx"
 MAX_PAGES = 5
@@ -36,6 +39,31 @@ _STREET_AND_NUMBER = re.compile(r"^(?P<street>.*?)\s+(?P<number>\d+\s*[א-ת]?)$
 
 # Option labels on a listing page, written the way the other sites write them
 FEATURE_LABELS = {"ממד": 'ממ"ד', "מזגן": "מיזוג"}
+
+# The search form's room counts; a search names one by its position (from 1)
+ROOM_OPTIONS = (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 8, 9, 10)
+
+
+def _room_option(rooms: float, *, round_up: bool) -> int:
+    """The position of the site's room count nearest to rooms, rounding outwards."""
+    if round_up:
+        return next(
+            (n for n, option in enumerate(ROOM_OPTIONS, 1) if option >= rooms), len(ROOM_OPTIONS)
+        )
+    return max((n for n, option in enumerate(ROOM_OPTIONS, 1) if option <= rooms), default=1)
+
+
+def search_url(criteria: SearchCriteria) -> str:
+    filters = [
+        f"city={quote(criteria.city)}",
+        f"inumber4={_room_option(criteria.rooms_min, round_up=False)}",
+        f"inumber4_1={_room_option(criteria.rooms_max, round_up=True)}",
+    ]
+    if criteria.price_min:
+        filters.append(f"flong3={criteria.price_min}")
+    if criteria.price_max:
+        filters.append(f"flong3_1={criteria.price_max}")
+    return f"{SITE}/rent/" + "$$".join(filters)
 
 
 def _cell(cells: list[Tag], index: int) -> str | None:
@@ -116,7 +144,8 @@ def parse_page(html: str) -> tuple[list[ListingData], bool]:
     soup = BeautifulSoup(html, "lxml")
     rows = soup.select("tr[id^=ad_]")
     listings = [listing for row in rows if (listing := _parse_row(row)) is not None]
-    has_next = soup.find("a", class_="pagingtext", string=re.compile("הבא")) is not None
+    # On the last page "next" is still there, but disabled and without a link
+    has_next = soup.find("a", class_="pagingtext", href=True, string=re.compile("הבא")) is not None
     return listings, has_next
 
 
@@ -135,7 +164,7 @@ class HomelessSource(Source):
         return parse_details(html) if "IconOption" in html else None
 
     def search_url(self, criteria: SearchCriteria) -> str:
-        return f"{SITE}/rent/city={quote(criteria.city)}"
+        return search_url(criteria)
 
     async def fetch(
         self, page: Page, criteria: SearchCriteria, custom_url: str | None
@@ -152,8 +181,9 @@ class HomelessSource(Source):
             found, has_next = parse_page(await page.content())
             new = [listing for listing in found if listing.source_id not in listings]
             listings.update((listing.source_id, listing) for listing in new)
-            # Past the last page the site keeps offering "next" and repeats the first page
+            # Past the last page the site repeats the first page
             if not has_next or not new:
                 return FetchResult(list(listings.values()), complete=True)
         # Older pages hold old listings; don't treat what's beyond them as removed
+        log.warning("Homeless has more than %d pages of results", MAX_PAGES)
         return FetchResult(list(listings.values()), complete=False)

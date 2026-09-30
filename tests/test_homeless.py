@@ -11,7 +11,11 @@ from roomfinder.sources.homeless import HomelessSource, parse_details, parse_pag
 FIXTURES = Path(__file__).parent / "fixtures"
 PAGE1 = (FIXTURES / "homeless_page1.html").read_text(encoding="utf-8")
 DETAIL = (FIXTURES / "homeless_detail.html").read_text(encoding="utf-8")
-LAST_PAGE = PAGE1.replace("הבא &gt;", "")
+# On the last page "next" is disabled
+LAST_PAGE = PAGE1.replace(
+    '<a class="pagingtext" href="/rent/city=ראשון לציון/2">הבא &gt;',
+    '<a disabled="" class="pagingtext">הבא &gt;',
+)
 
 
 class FakePage:
@@ -92,10 +96,29 @@ def test_options_that_are_off():
     assert parse_details(html).furnished is False
 
 
-def test_search_url_uses_the_city_name():
+CITY = "city=%D7%A8%D7%90%D7%A9%D7%95%D7%9F%20%D7%9C%D7%A6%D7%99%D7%95%D7%9F"
+
+
+def test_search_url_has_the_city_and_rooms():
     assert HomelessSource().search_url(SearchCriteria()) == (
-        "https://www.homeless.co.il/rent/city=%D7%A8%D7%90%D7%A9%D7%95%D7%9F%20%D7%9C%D7%A6%D7%99%D7%95%D7%9F"
+        f"https://www.homeless.co.il/rent/{CITY}$$inumber4=7$$inumber4_1=7"
     )
+
+
+def test_search_url_with_prices_and_rooms_between_the_site_options():
+    criteria = SearchCriteria(rooms_min=3.5, rooms_max=7.5, price_min=4000, price_max=7300)
+
+    assert HomelessSource().search_url(criteria) == (
+        f"https://www.homeless.co.il/rent/{CITY}"
+        "$$inumber4=6$$inumber4_1=14$$flong3=4000$$flong3_1=7300"
+    )
+    wide = SearchCriteria(rooms_min=0.5, rooms_max=12)
+    assert HomelessSource().search_url(wide).endswith("$$inumber4=1$$inumber4_1=16")
+
+
+def test_a_disabled_next_is_the_last_page():
+    assert parse_page(PAGE1)[1] is True
+    assert parse_page(LAST_PAGE)[1] is False
 
 
 async def test_fetch_follows_pages_until_the_last_one():
