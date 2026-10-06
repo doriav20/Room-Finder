@@ -24,6 +24,19 @@
 
 <form class="row g-2 align-items-end mb-4" method="get" action="/">
   <input type="hidden" name="tab" value="{{ tab }}">
+  <div class="col-12">
+    <label class="visually-hidden" for="f-q">חיפוש בטקסט המודעה</label>
+    <div class="input-group input-group-sm">
+      <span class="input-group-text">🔍</span>
+      <input id="f-q" name="q" type="search" class="form-control" value="{{ filters.q }}" maxlength="200"
+             placeholder='חיפוש בטקסט המודעה ובכתובת, למשל: מרפסת שמש, "2 מקלחות", -שותפים' enterkeyhint="search">
+      {% if filters.q %}<a class="btn btn-outline-secondary" href="?{{ filters.query(q=None) }}" title="ניקוי החיפוש">✕</a>{% endif %}
+      <button class="btn btn-primary">חיפוש</button>
+    </div>
+    <div class="form-text">
+      כל המילים צריכות להופיע, גם כחלק ממילה ("מרפסת" מוצא גם "ומרפסת"). מילים במירכאות צריכות להופיע ביחד, ומינוס לפני מילה (<code>-שותפים</code>) מוציא מודעות שהיא מופיעה בהן.
+    </div>
+  </div>
   <div class="col-6 col-md-2">
     <label class="form-label small mb-1" for="f-source">אתר</label>
     <select id="f-source" name="source" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -86,12 +99,18 @@
 </form>
 {% endif %}
 
+{% if without_text %}
+<div class="small text-body-secondary mb-2">
+  ℹ️ ל-{{ without_text }} מודעות בלשונית הזו עוד אין טקסט מודעה, ולכן החיפוש בדק בהן רק את הכותרת והכתובת. הטקסט נקרא בהדרגה, כמה מודעות בכל בדיקה.
+</div>
+{% endif %}
 <div id="grid" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3" data-latest-id="{{ latest_id }}">
   {% include "partials/listing_cards.html" %}
 </div>
 {% if not cards %}
 <div class="text-center text-body-secondary py-5">
-  {% if tab == 'new' %}אין מודעות חדשות כרגע. ההתראה תגיע ברגע שתתפרסם אחת.{% else %}אין מודעות להצגה.{% endif %}
+  {% if filters.q %}אין מודעות שמתאימות לחיפוש "{{ filters.q }}".
+  {% elif tab == 'new' %}אין מודעות חדשות כרגע. ההתראה תגיע ברגע שתתפרסם אחת.{% else %}אין מודעות להצגה.{% endif %}
 </div>
 {% endif %}
 {% endblock %}

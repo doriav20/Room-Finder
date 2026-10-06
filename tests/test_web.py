@@ -105,6 +105,40 @@ def test_csv_export_neutralizes_formulas_from_ads(client, db):
     assert "'=HYPERLINK" in text and ",'+1," in text
 
 
+def test_text_search(client, db):
+    add_listing(db, "a", price=5100, description="מרפסת שמש <גדולה> וחנייה בטאבו")
+    add_listing(db, "b", price=5200, street="ביאליק", description="לשותפים, יש מרפסת")
+    add_listing(db, "c", price=5300, street="הגפן", title="דירה, הגפן 1")
+
+    page = client.get("/?tab=all&q=מרפסת+-שותפים").text
+    nothing = client.get("/?tab=all&q=ג'קוזי").text
+    by_street = client.get("/?tab=all&q=הגפן").text
+
+    assert "5,100 ₪" in page and "5,200 ₪" not in page and "5,300 ₪" not in page
+    assert "<mark>מרפסת</mark> שמש &lt;גדולה&gt;" in page
+    assert '<details class="small mt-2 listing-description" open>' in page
+    assert 'value="מרפסת -שותפים"' in page
+    assert 'href="?tab=all" title="ניקוי החיפוש"' in page
+    # The tab counts follow the search
+    assert 'הכול <span class="badge text-bg-light">1</span>' in page
+    # A listing without an ad text is searched by its title and address only
+    assert "ל-1 מודעות בלשונית הזו עוד אין טקסט מודעה" in page
+    assert "5,300 ₪" in by_street and "📍 <mark>הגפן</mark> 12" in by_street
+    assert "אין מודעות שמתאימות לחיפוש" in nothing
+
+
+def test_text_search_carries_over_to_more_cards(client, db):
+    for number in range(80):
+        add_listing(db, f"x{number}", description="מרפסת" if number < 60 else "חצר")
+
+    page = client.get("/?tab=all&q=מרפסת").text
+    more = client.get("/listings/cards?tab=all&q=מרפסת&offset=48").text
+
+    assert page.count("<mark>מרפסת</mark>") == 48
+    assert "q=%D7%9E%D7%A8%D7%A4%D7%A1%D7%AA&offset=48" in page
+    assert more.count("<mark>מרפסת</mark>") == 12 and "טען עוד" not in more
+
+
 def test_furniture_and_parking_filters_and_chips(client, db):
     add_listing(db, "a", price=5100, furnished=True, parking=True, description="דירה\nמרווחת")
     add_listing(db, "b", price=5200, street="ביאליק", furnished=False, parking=False)

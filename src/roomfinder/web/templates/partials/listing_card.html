@@ -23,7 +23,7 @@
       {{ l.rooms | rooms }} חדרים{% if l.sqm %} · {{ l.sqm }} מ״ר{% endif %}{% if l.floor is not none %} · {{ l.floor | floor }}{% endif %}
     </div>
     <div class="text-body-secondary">
-      📍 {{ card.address or 'כתובת לא צוינה' }}{% if card.area_note %} <span class="small" title="השכונה לפי מפת העירייה">(לפי המפה: {{ card.area_note }})</span>{% endif %}
+      📍 {{ card.address | highlight(search) or 'כתובת לא צוינה' }}{% if card.area_note %} <span class="small" title="השכונה לפי מפת העירייה">(לפי המפה: {{ card.area_note }})</span>{% endif %}
     </div>
     <div class="mt-2 d-flex flex-wrap gap-1">
       {% if l.is_agency is true %}<span class="chip">תיווך</span>{% elif l.is_agency is false %}<span class="chip chip-private">פרטי</span>{% endif %}
@@ -34,10 +34,11 @@
       {% for feature in l.features[:6] if not (parking and feature == 'חניה') %}<span class="chip chip-feature">{{ feature }}</span>{% endfor %}
     </div>
     {% if l.description or l.furniture_details %}
-    <details class="small mt-2 listing-description">
+    {# Open when the searched words are in it, so the match shows without a click #}
+    <details class="small mt-2 listing-description"{% if search and search.found_in((l.description or '') ~ ' ' ~ (l.furniture_details or '')) %} open{% endif %}>
       <summary>תיאור המודעה</summary>
-      {% if l.description %}<p class="mb-1">{{ l.description }}</p>{% endif %}
-      {% if l.furniture_details %}<p class="mb-0"><strong>ריהוט:</strong> {{ l.furniture_details }}</p>{% endif %}
+      {% if l.description %}<p class="mb-1">{{ l.description | highlight(search) }}</p>{% endif %}
+      {% if l.furniture_details %}<p class="mb-0"><strong>ריהוט:</strong> {{ l.furniture_details | highlight(search) }}</p>{% endif %}
     </details>
     {% endif %}
     {% if card.duplicates %}

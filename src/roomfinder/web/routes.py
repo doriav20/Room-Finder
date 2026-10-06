@@ -4,8 +4,9 @@ import asyncio
 import csv
 import io
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import time, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -34,6 +35,7 @@ from roomfinder.normalize import CITY_ALIASES, normalize_city
 from roomfinder.pipeline import rematch_all
 from roomfinder.runner import get_source_state
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, SearchCriteria
+from roomfinder.search import MAX_QUERY_LENGTH, TextSearch
 from roomfinder.settings_store import (
     Preferences,
     get_criteria,
@@ -92,6 +94,8 @@ def configure_templates(settings: Settings) -> None:
     filters["local_datetime"] = lambda moment: formatting.local_datetime(moment, settings.timezone)
     filters["furniture_label"] = furniture_label
     filters["parking_label"] = parking_label
+    # Pages that render cards outside a search (e.g. after a status change) pass no search
+    filters["highlight"] = lambda text, search=None: (search or TextSearch()).highlight(text)
 
 
 # --- shared --------------------------------------------------------------------
@@ -149,6 +153,8 @@ class ListingFilters:
     # "yes" / "no" / "" - unlike the search criteria, these show known values only
     furnished: str = ""
     parking: str = ""
+    # Free text in the listing's own words (see search.py)
+    q: str = ""
     sort: str = "newest"
     all: bool = False
 
@@ -167,6 +173,7 @@ class ListingFilters:
             if params.get("furnished") in ("yes", "no")
             else "",
             parking=params.get("parking", "") if params.get("parking") in ("yes", "no") else "",
+            q=params.get("q", "").strip()[:MAX_QUERY_LENGTH],
             sort=sort if sort in {"newest", "price_asc", "price_desc"} else "newest",
             all=params.get("all") == "1",
         )
@@ -179,10 +186,15 @@ class ListingFilters:
             "price_max": self.price_max,
             "furnished": self.furnished,
             "parking": self.parking,
+            "q": self.q,
             "sort": self.sort if self.sort != "newest" else None,
             "all": "1" if self.all else None,
         } | overrides
         return urlencode({key: value for key, value in values.items() if value})
+
+    @cached_property
+    def search(self) -> TextSearch:
+        return TextSearch.parse(self.q)
 
 
 def _listings_query(filters: ListingFilters, tab: str) -> Select[tuple[Listing]]:
@@ -208,6 +220,8 @@ def _listings_query(filters: ListingFilters, tab: str) -> Select[tuple[Listing]]
         query = query.where(Listing.furnished.is_(filters.furnished == "yes"))
     if filters.parking:
         query = query.where(Listing.parking.is_(filters.parking == "yes"))
+    if filters.search:
+        query = query.where(*filters.search.conditions())
     return query
 
 
@@ -312,8 +326,15 @@ async def listings_page(request: Request) -> HTMLResponse:
         counts = {key: await _count(session, _listings_query(filters, key)) for key, _ in TABS}
         tab = filters.tab or ("new" if counts["new"] else "all")
         cards, next_offset = await _page_of_cards(session, filters, tab, 0)
+        # Listings whose ad text wasn't read yet: a search sees only their title and address
+        without_text = 0
+        if filters.search:
+            unsearched = _listings_query(replace(filters, q=""), tab)
+            without_text = await _count(session, unsearched.where(Listing.description.is_(None)))
         context = {
             "active": "listings",
+            "search": filters.search,
+            "without_text": without_text,
             "tab": tab,
             "tabs": [(key, label, counts[key]) for key, label in TABS],
             "tab_query": lambda key: filters.query(tab=key),
@@ -334,7 +355,12 @@ async def more_cards(request: Request, offset: int = 0) -> HTMLResponse:
     tab = filters.tab or "all"
     async with _sessionmaker(request)() as session:
         cards, next_offset = await _page_of_cards(session, filters, tab, max(offset, 0))
-    context = {"cards": cards, "next_offset": next_offset, "page_query": filters.query(tab=tab)}
+    context = {
+        "cards": cards,
+        "next_offset": next_offset,
+        "page_query": filters.query(tab=tab),
+        "search": filters.search,
+    }
     return render_partial(request, "partials/listing_cards.html", context)
 
 
