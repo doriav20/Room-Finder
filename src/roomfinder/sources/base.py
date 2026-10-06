@@ -29,7 +29,8 @@ class Source(ABC):
     label: ClassVar[str]
     default_interval_minutes: ClassVar[int] = 30
     night_interval_minutes: ClassVar[int] = 60
-    # Whether listing pages are read for furniture, parking and the ad's text
+    # Whether each listing's details are read (its page, or the site's API) for furniture,
+    # parking and the ad's text
     has_details: ClassVar[bool] = False
 
     @abstractmethod

@@ -117,3 +117,27 @@ async def test_blocked_or_html_answers():
         await OnMapSource().fetch(FakePage(FakeResponse(200, "<html>")), SearchCriteria(), None)
     with pytest.raises(SourceError):
         await OnMapSource().fetch(FakePage(FakeResponse(500, "")), SearchCriteria(), None)
+
+
+DETAILS = (Path(__file__).parent / "fixtures" / "onmap_details.json").read_text(encoding="utf-8")
+
+
+async def test_fetch_details_reads_the_ad_text():
+    page = FakePage(FakeResponse(200, DETAILS))
+
+    details = await OnMapSource().fetch_details(page, "HJBym0y1-e", "https://www.onmap.co.il/x")
+
+    assert page.visited == ["https://phoenix.onmap.co.il/v1/properties/HJBym0y1-e"]
+    assert details.description == (
+        "דירה גדולה ומרווחת בשכונה ירוקה, דוד שמש חדש, מזגנים חדשים.\nחניה פרטית ומרכז מסחרי קטן."
+    )
+
+
+async def test_fetch_details_of_a_listing_that_is_gone():
+    gone = json.dumps(json.loads(DETAILS) | {"is_active": False})
+    source = OnMapSource()
+
+    assert await source.fetch_details(FakePage(FakeResponse(404, "")), "x", "") is None
+    assert await source.fetch_details(FakePage(FakeResponse(200, gone)), "x", "") is None
+    with pytest.raises(BlockedError):
+        await source.fetch_details(FakePage(FakeResponse(429, "")), "x", "")

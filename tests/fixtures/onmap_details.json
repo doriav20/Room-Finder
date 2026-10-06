@@ -1,0 +1,13 @@
+{
+  "section": "residence",
+  "search_option": "rent",
+  "property_type": "apartment",
+  "description": "דירה גדולה ומרווחת בשכונה ירוקה, דוד שמש חדש, מזגנים חדשים.\nחניה פרטית ומרכז מסחרי קטן.",
+  "is_active": true,
+  "is_deleted": false,
+  "additional_info": {"area": {"base": 120}, "rooms": 4, "bathrooms": 2},
+  "price": 6200,
+  "currency": "ILS",
+  "id": "HJBym0y1-e",
+  "slug": "apartment-for-rent-rishon-letsiyon-mishor-hanof-hjbym0y1e"
+}

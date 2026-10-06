@@ -1,21 +1,30 @@
 """OnMap (onmap.co.il) - a map-based listings site with a JSON search API.
 
-One API call returns every listing in the city for the requested room counts.
+One API call returns every listing in the city for the requested room counts, and another
+one a listing's own details, such as the ad's text.
 """
 
 import json
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from playwright.async_api import Page
 
-from roomfinder.normalize import clean_text, parse_floor, parse_int, parse_price, parse_rooms
-from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
+from roomfinder.normalize import (
+    clean_multiline,
+    clean_text,
+    parse_floor,
+    parse_int,
+    parse_price,
+    parse_rooms,
+)
+from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 from roomfinder.sources.base import BlockedError, FetchResult, Source, SourceError
 
 SITE = "https://www.onmap.co.il"
 SEARCH_API = "https://phoenix.onmap.co.il/v1/properties/mixed_search"
+DETAILS_API = "https://phoenix.onmap.co.il/v1/properties/{id}"
 DETAILS_URL = SITE + "/home-details/{slug}"
 
 CITY_SLUGS = {"ראשון לציון": "rishon-letsiyon"}
@@ -169,11 +178,36 @@ def parse_response(body: dict[str, Any]) -> list[ListingData]:
     return [listing for item in items if isinstance(item, dict) and (listing := parse_item(item))]
 
 
+def parse_details(body: Any) -> ListingDetails | None:
+    """A listing's own details (None when it was taken down)."""
+    if not isinstance(body, dict) or body.get("is_deleted") or body.get("is_active") is False:
+        return None
+    return ListingDetails(description=clean_multiline(body.get("description")))
+
+
+async def _get_json(page: Page, url: str) -> Any:
+    """GET one of the API's addresses; None when there is no such listing."""
+    response = await page.goto(url, wait_until="domcontentloaded")
+    if response is None:
+        raise SourceError("OnMap gave no response")
+    if response.status in (401, 403, 429):
+        raise BlockedError(f"OnMap answered {response.status}")
+    if response.status == 404:
+        return None
+    if response.status != 200:
+        raise SourceError(f"OnMap answered {response.status}")
+    try:
+        return json.loads(await response.text())
+    except json.JSONDecodeError:
+        raise BlockedError("OnMap returned a page instead of JSON") from None
+
+
 class OnMapSource(Source):
     name = "onmap"
     label = "OnMap"
     default_interval_minutes = 30
     night_interval_minutes = 60
+    has_details = True
 
     def search_url(self, criteria: SearchCriteria) -> str:
         return search_url(criteria)
@@ -181,15 +215,10 @@ class OnMapSource(Source):
     async def fetch(
         self, page: Page, criteria: SearchCriteria, custom_url: str | None
     ) -> FetchResult:
-        response = await page.goto(custom_url or api_url(criteria), wait_until="domcontentloaded")
-        if response is None:
-            raise SourceError("OnMap gave no response")
-        if response.status in (401, 403, 429):
-            raise BlockedError(f"OnMap answered {response.status}")
-        if response.status != 200:
-            raise SourceError(f"OnMap answered {response.status}")
-        try:
-            body = json.loads(await response.text())
-        except json.JSONDecodeError:
-            raise BlockedError("OnMap returned a page instead of JSON") from None
+        body = await _get_json(page, custom_url or api_url(criteria))
+        if body is None:
+            raise SourceError("OnMap answered 404")
         return FetchResult(parse_response(body), complete=True)
+
+    async def fetch_details(self, page: Page, source_id: str, url: str) -> ListingDetails | None:
+        return parse_details(await _get_json(page, DETAILS_API.format(id=quote(source_id))))
