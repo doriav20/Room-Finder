@@ -294,16 +294,19 @@ class Yad2Source(Source):
         return FetchResult(list(unique.values()), complete=complete)
 
     async def _results_page_html(self, page: Page) -> str:
-        # Radware may show a challenge first; give one that solves itself a moment
-        for _ in range(3):
+        # Radware may show a challenge first (always without its cookie, e.g. a new profile);
+        # give one that solves itself a moment. It then reloads the page, which has its title
+        # a moment before its data
+        for attempt in range(4):
+            if attempt:
+                await page.wait_for_timeout(5000)
             html = await page.content()
-            title = await page.title()
             if "__NEXT_DATA__" in html:
                 return html
-            if not is_challenge(title, page.url, html[:5000]):
-                raise SourceError(f"Unexpected Yad2 page: {title!r}")
-            await page.wait_for_timeout(5000)
-        raise BlockedError(f"Yad2 shows a bot check: {await page.title()!r}")
+        title = await page.title()
+        if is_challenge(title, page.url, html[:5000]):
+            raise BlockedError(f"Yad2 shows a bot check: {title!r}")
+        raise SourceError(f"Unexpected Yad2 page: {title!r}")
 
     async def fetch_details(self, page: Page, source_id: str, url: str) -> ListingDetails | None:
         # The API is called from a Yad2 page, like the site does; normally the tab is still
