@@ -12,7 +12,7 @@
     </div>
     {% endif %}
   </td>
-  <td>
+  <td data-label="מצב">
     {% if row.running %}<span class="spinner-border spinner-border-sm text-primary"></span> בודק…
     {% elif not row.state.enabled %}⏸ כבוי
     {% elif row.state.last_run_at is none %}⏳ עוד לא נבדק
@@ -20,7 +20,7 @@
     {% else %}✅ תקין{% endif %}
     {% if row.state.last_error %}<div class="small text-danger text-truncate" style="max-width: 16rem" title="{{ row.state.last_error }}">{{ row.state.last_error }}</div>{% endif %}
   </td>
-  <td class="small">
+  <td class="small" data-label="בדיקה אחרונה">
     {% if row.state.last_run_at %}
     <div title="{{ row.state.last_run_at | local_datetime }}">{{ row.state.last_run_at | ago }}</div>
     {% if row.state.last_success_at and row.state.last_success_at != row.state.last_run_at %}
@@ -28,8 +28,8 @@
     {% endif %}
     {% else %}—{% endif %}
   </td>
-  <td class="small">{{ row.active }} פעילות<br><span class="text-body-secondary">{{ row.matching }} מתאימות</span></td>
-  <td style="max-width: 9rem">
+  <td class="small" data-label="תוצאות">{{ row.active }} פעילות<br><span class="text-body-secondary">{{ row.matching }} מתאימות</span></td>
+  <td style="max-width: 9rem" data-label="כל כמה דקות">
     <form hx-post="/sources/{{ row.name }}/settings" hx-target="#source-{{ row.name }}" hx-swap="outerHTML" hx-trigger="change">
       <input type="number" name="interval_minutes" min="5" max="240" class="form-control form-control-sm"
              value="{{ row.state.interval_minutes or '' }}" placeholder="{{ row.default_interval }}">
@@ -43,7 +43,7 @@
             hx-target="#source-{{ row.name }}" hx-swap="outerHTML">{% if row.state.enabled %}כבה{% else %}הפעל{% endif %}</button>
   </td>
 </tr>
-<tr class="small">
+<tr class="small stack-joined">
   <td colspan="6" class="pt-0 border-top-0">
     <details{% if row.state.custom_url %} open{% endif %}>
       <summary class="text-body-secondary">כתובת חיפוש מותאמת (לא חובה)</summary>

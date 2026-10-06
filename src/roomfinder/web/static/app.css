@@ -157,3 +157,91 @@ body {
   height: 150px;
   display: block;
 }
+
+/* Phones */
+@media (max-width: 767.98px) {
+  /* iOS zooms into any field with text smaller than 16px when it gets focus */
+  .form-control,
+  .form-select {
+    font-size: 1rem;
+  }
+
+  .listing-photo {
+    height: 210px;
+  }
+
+  /* The tabs scroll sideways in one line instead of taking three */
+  .listing-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    white-space: nowrap;
+  }
+
+  .listing-tabs .nav-link {
+    padding: 0.35rem 0.75rem;
+  }
+
+  .areas-map {
+    height: 55vh;
+    min-height: 300px;
+  }
+
+  /* A table becomes a list of blocks: each row one block, its cells two to a line under their
+     column's name. A cell without a column name (the row's title, its buttons) takes a whole line */
+  .table-stack thead,
+  .table-stack .stack-empty {
+    display: none;
+  }
+
+  .table-stack tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1rem;
+  }
+
+  .table-stack td {
+    display: block;
+  }
+
+  .table-stack td:not([data-label]),
+  .table-stack td.stack-wide {
+    grid-column: 1 / -1;
+  }
+
+  .table-stack tbody tr {
+    padding-block: 0.5rem;
+    border-top: var(--bs-border-width) solid var(--bs-border-color);
+  }
+
+  .table-stack tbody:first-of-type tr:first-child,
+  .table-stack tr.stack-joined {
+    border-top: 0;
+  }
+
+  .table-stack tr.stack-joined {
+    padding-top: 0;
+  }
+
+  .table-stack > :not(caption) > * > * {
+    border-bottom: 0;
+    padding-block: 0.2rem;
+    max-width: none !important;
+  }
+
+  .table-stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+  }
+}
+
+/* The menu folded under the navbar's button */
+@media (max-width: 1199.98px) {
+  .navbar-collapse .navbar-status {
+    border-top: var(--bs-border-width) solid var(--bs-border-color);
+    margin-top: 0.5rem;
+    padding-block: 0.75rem 0.25rem;
+  }
+}

@@ -1,3 +1,16 @@
+// Buttons that open and close a collapsed part of the page on a phone (the menu, the filters).
+// Bootstrap's own script isn't loaded, so this does what its collapse plugin would.
+document.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-toggle]");
+  if (!toggle) return;
+  const target = document.querySelector(toggle.dataset.toggle);
+  const open = target.classList.toggle("show");
+  toggle.setAttribute("aria-expanded", String(open));
+});
+
+// On a phone the listing tabs scroll sideways; bring the chosen one into view
+document.querySelector(".listing-tabs .active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+
 // Polls for new listings while the dashboard is open, and announces them with a
 // banner, a browser notification and a short sound.
 (function () {

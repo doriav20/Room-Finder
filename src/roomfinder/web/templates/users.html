@@ -9,7 +9,7 @@
   <div class="col-lg-8">
     <div class="card shadow-sm">
       <div class="table-responsive">
-        <table class="table align-middle mb-0">
+        <table class="table align-middle mb-0 table-stack">
           <thead class="table-light">
             <tr><th>משתמש</th><th>תפקיד</th><th>טלגרם</th><th>כניסה אחרונה</th><th></th></tr>
           </thead>
@@ -21,11 +21,11 @@
                 {% if not user.is_active %}<span class="badge text-bg-secondary">מושבת</span>{% endif %}
                 <div class="small text-body-secondary">נוצר {{ user.created_at | local_datetime }}</div>
               </td>
-              <td>{% if user.is_admin %}מנהל{% else %}משתמש{% endif %}</td>
-              <td class="small">
+              <td data-label="תפקיד">{% if user.is_admin %}מנהל{% else %}משתמש{% endif %}</td>
+              <td class="small" data-label="טלגרם">
                 {% for chat in chats_by_account.get(user.id, []) %}<div>✈️ {{ chat.name }}</div>{% else %}—{% endfor %}
               </td>
-              <td class="small">{{ user.last_login_at | ago if user.last_login_at else '—' }}</td>
+              <td class="small" data-label="כניסה אחרונה">{{ user.last_login_at | ago if user.last_login_at else '—' }}</td>
               <td class="text-nowrap">
                 {% if user.id != current_user.id %}
                 <div class="d-flex flex-wrap gap-1">
@@ -60,7 +60,7 @@
       <div class="card-header bg-body fw-semibold">חיבורי טלגרם בלי משתמש</div>
       <ul class="list-group list-group-flush">
         {% for chat in unassigned_chats %}
-        <li class="list-group-item d-flex align-items-center gap-2">
+        <li class="list-group-item d-flex flex-wrap align-items-center gap-2">
           <span>✈️ {{ chat.name }}</span>
           <small class="text-body-secondary">מאז {{ chat.created_at | local_datetime }}</small>
           <form class="ms-auto" method="post" action="/users/telegram/{{ chat.chat_id }}/remove">

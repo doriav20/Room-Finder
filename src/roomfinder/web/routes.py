@@ -192,6 +192,12 @@ class ListingFilters:
         } | overrides
         return urlencode({key: value for key, value in values.items() if value})
 
+    @property
+    def active_count(self) -> int:
+        """How many of the filters under the search box are set (the phone layout folds them)"""
+        values = (self.source, self.area, self.price_max, self.furnished, self.parking, self.all)
+        return sum(1 for value in values if value) + (self.sort != "newest")
+
     @cached_property
     def search(self) -> TextSearch:
         return TextSearch.parse(self.q)

@@ -7,7 +7,7 @@
 {% if telegram.chats %}
 <ul class="list-group mb-3">
   {% for chat in telegram.chats %}
-  <li class="list-group-item d-flex align-items-center gap-2">
+  <li class="list-group-item d-flex flex-wrap align-items-center gap-2">
     <span>✈️ {{ chat.name }}</span>
     <small class="text-body-secondary">מאז {{ chat.created_at | local_datetime }}</small>
     <button class="btn btn-sm btn-outline-danger ms-auto" hx-post="/account/telegram/{{ chat.chat_id }}/remove"
