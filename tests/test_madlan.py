@@ -30,6 +30,7 @@ BULLETIN = {
     },
     "area": 100,
     "beds": 4,
+    "description": "דירה מרווחת, ללא ריהוט.\nחניה בטאבו ומרפסת שמש",
     "floor": "3",
     "price": 6000,
     "firstTimeSeen": "2026-09-03T08:47:24.000Z",
@@ -142,6 +143,8 @@ def test_bulletin_fields():
 
     assert listing.url == "https://www.madlan.co.il/listings/uamRPJPrKMD"
     assert (listing.price, listing.rooms, listing.sqm, listing.floor) == (6000, 4.0, 100, 3)
+    assert listing.description == "דירה מרווחת, ללא ריהוט.\nחניה בטאבו ומרפסת שמש"
+    assert (listing.furnished, listing.parking) == (False, True)
     assert (listing.city, listing.neighborhood, listing.street, listing.house_number) == (
         "ראשון לציון",
         "רמז",
@@ -269,3 +272,24 @@ async def test_too_many_pages_is_incomplete(monkeypatch):
 
     assert page.api_calls == []
     assert result.complete is False
+
+
+async def test_a_first_page_without_the_ads_text_is_read_again_from_the_api():
+    bare = {key: value for key, value in BULLETIN.items() if key != "description"}
+    page = FakePage([page_html([bare], 1)], [api_page([BULLETIN], 1)])
+
+    result = await MadlanSource().fetch(page, SearchCriteria(), None)
+
+    assert page.api_calls[0]["variables"]["offset"] == 0
+    assert "listingEdited" not in page.api_calls[0]["variables"]
+    assert result.listings[0].description == BULLETIN["description"]
+
+
+async def test_a_failing_api_keeps_the_first_page_without_the_text():
+    bare = {key: value for key, value in BULLETIN.items() if key != "description"}
+    page = FakePage([page_html([bare], 1)], [{"status": 500, "body": "oops"}])
+
+    result = await MadlanSource().fetch(page, SearchCriteria(), None)
+
+    assert [listing.description for listing in result.listings] == [None]
+    assert result.complete is True

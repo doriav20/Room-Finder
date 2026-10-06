@@ -3,7 +3,8 @@
 Madlan is guarded by PerimeterX, which blocks a browser that loads a second page soon after
 the first. So the search page is loaded once, its first page of results is read from the data
 embedded in it, and the following pages come from the GraphQL API that the page itself calls,
-with the page's own search variables. The source runs rarely.
+with the page's own search variables. The ads' text comes with the results, so listing pages
+are never loaded. The source runs rarely.
 """
 
 import json
@@ -15,7 +16,16 @@ from urllib.parse import quote, urlencode
 
 from playwright.async_api import Page
 
-from roomfinder.normalize import clean_text, parse_floor, parse_int, parse_price, parse_rooms
+from roomfinder.normalize import (
+    clean_multiline,
+    clean_text,
+    furniture_from_text,
+    parking_from_text,
+    parse_floor,
+    parse_int,
+    parse_price,
+    parse_rooms,
+)
 from roomfinder.schemas import ListingData, PropertyType, SearchCriteria
 from roomfinder.sources.base import BlockedError, FetchResult, Source, SourceError, human_pause
 
@@ -90,6 +100,7 @@ SEARCH_FIELDS = """
         address
         price
         beds
+        description
         area
         floor
         buildingClass
@@ -208,14 +219,25 @@ def search_results(result: Any) -> tuple[list[dict[str, Any]], int]:
     return list(result.get("poi") or []), int(result.get("total") or 0)
 
 
+def query_variables(variables: dict[str, Any]) -> dict[str, Any]:
+    """The page's search variables that the query takes, as they are (its first page)."""
+    return {name: value for name, value in variables.items() if name in QUERY_VARIABLES}
+
+
+def has_descriptions(result: dict[str, Any]) -> bool:
+    """Whether the results carry the ads' text (even when an ad has none)."""
+    pois, _ = search_results(result)
+    bulletins = [poi for poi in pois if poi.get("type") == "bulletin"]
+    return not bulletins or any("description" in poi for poi in bulletins)
+
+
 def page_variables(
     variables: dict[str, Any], previous: dict[str, Any], number: int
 ) -> dict[str, Any]:
     """The search variables for page `number`, following the page that returned `previous`."""
     cursor = previous.get("cursor") or {}
     limit = int(variables.get("limit") or 50)
-    known = {name: value for name, value in variables.items() if name in QUERY_VARIABLES}
-    return known | {
+    return query_variables(variables) | {
         "offset": (number - 1) * limit,
         "cursor": {
             "seenProjects": cursor.get("seenProjects"),
@@ -246,11 +268,14 @@ def parse_poi(poi: dict[str, Any]) -> ListingData | None:
     ]
     street = clean_text(details.get("streetName"))
     number = clean_text(details.get("streetNumber"))
+    # The ad's text comes with the search results; listing pages are never loaded (see above)
+    description = clean_multiline(poi.get("description"))
     return ListingData(
         source="madlan",
         source_id=str(poi["id"]),
         url=LISTING_URL.format(id=poi["id"]),
         title=clean_text(poi.get("address")),
+        description=description,
         price=parse_price(poi.get("price")),
         rooms=parse_rooms(poi.get("beds")),
         sqm=parse_int(poi.get("area")) or None,
@@ -264,6 +289,8 @@ def parse_poi(poi: dict[str, Any]) -> ListingData | None:
         longitude=point.get("lng"),
         is_agency={"private": False, "agent": True}.get(contact_type),
         images=images,
+        furnished=furniture_from_text(description),
+        parking=parking_from_text(description),
         posted_at=_posted_at(poi.get("firstTimeSeen")),
     )
 
@@ -285,6 +312,14 @@ class MadlanSource(Source):
         if is_bot_check(html):
             raise BlockedError("Madlan shows a bot check (press and hold)")
         result, variables = search_list(parse_ssr_context(html))
+        if not has_descriptions(result):
+            # The page's own data may leave out the ads' text; the API returns the same page
+            # with it, like the following pages
+            await human_pause(2.0, 5.0)
+            try:
+                result = await self._api_page(page, query_variables(variables))
+            except (BlockedError, SourceError) as exc:
+                log.warning("Madlan's first page is without the ads' text: %s", exc)
         pois, total = search_results(result)
         listings: dict[str, ListingData] = {}
         listings.update((listing.source_id, listing) for poi in pois if (listing := parse_poi(poi)))
