@@ -2,6 +2,7 @@
 
 import asyncio
 import csv
+import hashlib
 import io
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
@@ -50,6 +51,7 @@ from roomfinder.web.security import require_user
 # Every page here needs a signed-in user (see web/accounts.py for signing in)
 router = APIRouter(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+STATIC_DIR = Path(__file__).parent / "static"
 
 PAGE_SIZE = 48
 PRICE_DROP_WINDOW = timedelta(days=14)
@@ -76,10 +78,21 @@ SETTABLE_STATUSES = {
 }
 
 
+_static_versions: dict[str, tuple[int, str]] = {}
+
+
 def static_url(path: str) -> str:
     # By path only: a full http:// address would be blocked on a page served over HTTPS
-    # by a proxy in front (e.g. Tailscale), which talks plain HTTP to the dashboard
-    return f"/static/{path}"
+    # by a proxy in front (e.g. Tailscale), which talks plain HTTP to the dashboard.
+    # The version changes with the file's content, so browsers can keep it for good
+    # without a round trip on every page (main.py marks versioned files immutable)
+    file = STATIC_DIR / path
+    modified = file.stat().st_mtime_ns
+    cached = _static_versions.get(path)
+    if cached is None or cached[0] != modified:
+        cached = (modified, hashlib.sha256(file.read_bytes()).hexdigest()[:12])
+        _static_versions[path] = cached
+    return f"/static/{path}?v={cached[1]}"
 
 
 def configure_templates(settings: Settings) -> None:

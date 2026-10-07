@@ -109,6 +109,16 @@ def test_static_files_and_sign_in_page_are_public(anonymous):
     assert page.status_code == 200 and "כניסה" in page.text
 
 
+def test_pages_link_static_files_by_version_and_cache_them_for_good(anonymous):
+    page = anonymous.get("/login", headers={"Accept-Encoding": "gzip"})
+    assert page.headers["Content-Encoding"] == "gzip"
+    versioned = re.search(r'href="(/static/app\.css\?v=\w+)"', page.text)
+    assert versioned
+    stylesheet = anonymous.get(versioned[1])
+    assert stylesheet.status_code == 200
+    assert stylesheet.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
 def test_security_headers(anonymous, client):
     response = client.get("/")
 
@@ -364,7 +374,7 @@ def test_the_dashboard_works_behind_an_https_proxy(start_dashboard, admin):
     )  # fmt: skip
 
     # A full http:// address would be blocked on an HTTPS page
-    assert 'href="/static/app.css"' in page and "http://" + PROXY_HOST not in page
+    assert 'href="/static/app.css?v=' in page and "http://" + PROXY_HOST not in page
     assert signed_in.status_code == 303
     assert "secure" in signed_in.headers["set-cookie"].lower()
     invite = proxied.post(

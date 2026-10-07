@@ -3,11 +3,11 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from roomfinder import __version__
@@ -24,7 +24,7 @@ from roomfinder.settings_store import get_criteria
 from roomfinder.sources import build_sources
 from roomfinder.web.accounts import account_router, admin_router, public_router
 from roomfinder.web.novnc import add_novnc
-from roomfinder.web.routes import configure_templates
+from roomfinder.web.routes import STATIC_DIR, configure_templates
 from roomfinder.web.routes import router as web_router
 from roomfinder.web.security import (
     LoginRequired,
@@ -35,7 +35,6 @@ from roomfinder.web.security import (
 
 log = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "web" / "static"
 # Everything else needs a signed-in user
 PUBLIC_PATHS = frozenset({"/login", "/logout", "/register", "/reset", "/health"})
 PUBLIC_PREFIXES = ("/static/",)
@@ -176,13 +175,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
-        if request.url.path.startswith(PUBLIC_PREFIXES):
-            # Stylesheets and scripts are checked with the server on every load (a cheap
-            # "not modified"), so after an update no page runs with last version's files
+        if request.url.path.startswith(PUBLIC_PREFIXES) and "v" in request.query_params:
+            # Pages link stylesheets and scripts by content version (static_url), so a
+            # version never changes and needs no "not modified" round trip on every page
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif request.url.path.startswith(PUBLIC_PREFIXES):
+            # Unversioned (e.g. images a stylesheet loads): checked with the server each time
             response.headers["Cache-Control"] = "no-cache"
         else:
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    # Pages are sent uncompressed otherwise, and behind a tunnel they go up the home upload
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # The loopback names stay allowed for Docker's health check; DNS rebinding can't use them
     hosts = list(dict.fromkeys([*settings.allowed_hosts, "localhost", "127.0.0.1"]))
