@@ -245,3 +245,33 @@ body {
     padding-block: 0.75rem 0.25rem;
   }
 }
+
+/* A dropdown of checkboxes (the sites filter), built on <details> */
+.multi-select {
+  position: relative;
+}
+
+.multi-select > summary {
+  list-style: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multi-select > summary::-webkit-details-marker {
+  display: none;
+}
+
+.multi-select-menu {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 0.25rem);
+  inset-inline: 0;
+  min-width: 12rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  box-shadow: var(--bs-box-shadow);
+}

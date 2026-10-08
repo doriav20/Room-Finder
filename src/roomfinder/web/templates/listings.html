@@ -48,13 +48,27 @@
         </div>
       </div>
       <div class="col-6 col-md-2">
-        <label class="form-label small mb-1" for="f-source">אתר</label>
-        <select id="f-source" name="source" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">הכול</option>
-          {% for name, label in source_labels.items() %}
-          <option value="{{ name }}"{% if filters.source == name %} selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
+        <span class="form-label small mb-1 d-block" id="f-source-label">אתרים</span>
+        {# Several sites can be chosen; the choice applies when the list closes (app.js) #}
+        <details class="multi-select" aria-labelledby="f-source-label">
+          <summary class="form-select form-select-sm">
+            {%- if filters.sources -%}
+            {% for name in filters.sources %}{{ source_labels.get(name, name) }}{% if not loop.last %}, {% endif %}{% endfor %}
+            {%- else -%}
+            כל האתרים
+            {%- endif -%}
+          </summary>
+          <div class="multi-select-menu">
+            {% for name, label in source_labels.items() %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="f-source-{{ name }}" name="source" value="{{ name }}"
+                     {% if name in filters.sources %}checked{% endif %}>
+              <label class="form-check-label" for="f-source-{{ name }}">{{ label }}</label>
+            </div>
+            {% endfor %}
+            <div class="small text-body-secondary mt-1">בלי סימון מוצגים כל האתרים</div>
+          </div>
+        </details>
       </div>
       <div class="col-6 col-md-3">
         <label class="form-label small mb-1" for="f-area">שכונה</label>

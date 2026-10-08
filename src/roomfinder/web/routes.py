@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from roomfinder import areas
 from roomfinder.config import NOVNC_PAGE, Settings
@@ -160,7 +161,8 @@ def _known_source(request: Request, name: str) -> str:
 @dataclass
 class ListingFilters:
     tab: str = ""
-    source: str = ""
+    # The sites to show; none means all of them
+    sources: list[str] = field(default_factory=list)
     area: str = ""
     price_max: int | None = None
     # "yes" / "no" / "" - unlike the search criteria, these show known values only
@@ -179,7 +181,7 @@ class ListingFilters:
         sort = params.get("sort", "newest")
         return cls(
             tab=tab if tab in dict(TABS) else "",
-            source=params.get("source", ""),
+            sources=list(dict.fromkeys(params.getlist("source"))),
             area=params.get("area", ""),
             price_max=int(price_max) if price_max.isdigit() else None,
             furnished=params.get("furnished", "")
@@ -194,7 +196,7 @@ class ListingFilters:
     def query(self, **overrides: Any) -> str:
         values = {
             "tab": self.tab,
-            "source": self.source,
+            "source": self.sources,
             "area": self.area,
             "price_max": self.price_max,
             "furnished": self.furnished,
@@ -203,12 +205,12 @@ class ListingFilters:
             "sort": self.sort if self.sort != "newest" else None,
             "all": "1" if self.all else None,
         } | overrides
-        return urlencode({key: value for key, value in values.items() if value})
+        return urlencode({key: value for key, value in values.items() if value}, doseq=True)
 
     @property
     def active_count(self) -> int:
         """How many of the filters under the search box are set (the phone layout folds them)"""
-        values = (self.source, self.area, self.price_max, self.furnished, self.parking, self.all)
+        values = (self.sources, self.area, self.price_max, self.furnished, self.parking, self.all)
         return sum(1 for value in values if value) + (self.sort != "newest")
 
     @cached_property
@@ -229,8 +231,19 @@ def _listings_query(filters: ListingFilters, tab: str) -> Select[tuple[Listing]]
     # Listings the user acted on stay visible even if they no longer fit the search
     if not filters.all and tab not in ("favorite", "contacted", "hidden"):
         query = query.where(Listing.matches.is_(True))
-    if filters.source:
-        query = query.where(Listing.source == filters.source)
+    if filters.sources:
+        # A listing is also on a site when one of its duplicates was found there
+        copy = aliased(Listing)
+        on_a_chosen_site = (
+            select(copy.id)
+            .where(
+                copy.duplicate_of_id == Listing.id,
+                copy.removed_at.is_(None),
+                copy.source.in_(filters.sources),
+            )
+            .exists()
+        )
+        query = query.where(or_(Listing.source.in_(filters.sources), on_a_chosen_site))
     if filters.area:
         query = query.where(Listing.area == filters.area)
     if filters.price_max:

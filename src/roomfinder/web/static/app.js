@@ -8,6 +8,24 @@ document.addEventListener("click", (event) => {
   toggle.setAttribute("aria-expanded", String(open));
 });
 
+// A dropdown of checkboxes (the sites filter): picking several sites takes several clicks,
+// so the filter is applied once, when the list closes, rather than on every click
+document.querySelectorAll("details.multi-select").forEach((dropdown) => {
+  const checked = () => [...dropdown.querySelectorAll("input:checked")].map((input) => input.value).join();
+  let opened = checked();
+  dropdown.addEventListener("toggle", () => {
+    if (dropdown.open) opened = checked();
+    else if (checked() !== opened) dropdown.closest("form").submit();
+  });
+});
+
+// A click outside an open dropdown closes it
+document.addEventListener("click", (event) => {
+  document.querySelectorAll("details.multi-select[open]").forEach((dropdown) => {
+    if (!dropdown.contains(event.target)) dropdown.open = false;
+  });
+});
+
 // On a phone the listing tabs scroll sideways; bring the chosen one into view
 document.querySelector(".listing-tabs .active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 

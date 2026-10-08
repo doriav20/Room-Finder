@@ -154,6 +154,28 @@ def test_furniture_and_parking_filters_and_chips(client, db):
     assert "5,200 ₪" in no_parking and "5,100 ₪" not in no_parking
 
 
+def test_filtering_by_several_sites(client, db):
+    add_listing(db, "a", price=5100)
+    add_listing(db, "b", price=5200, source="madlan")
+    add_listing(db, "c", price=5300, source="komo")
+    original = add_listing(db, "d", price=5400, source="homeless")
+    add_listing(db, "d-copy", source="onmap", duplicate_of_id=original.id)
+
+    page = client.get("/?tab=all&source=yad2&source=madlan").text
+    everything = client.get("/?tab=all").text
+    by_copy = client.get("/?tab=all&source=onmap").text
+
+    assert "5,100 ₪" in page and "5,200 ₪" in page
+    assert "5,300 ₪" not in page and "5,400 ₪" not in page
+    assert re.search(r'value="yad2"\s+checked', page)
+    assert not re.search(r'value="komo"\s+checked', page)
+    assert "יד2, מדלן" in page and "כל האתרים" in everything
+    # The pages that follow keep both sites
+    assert "source=yad2&amp;source=madlan" in page
+    # A listing counts as on a site when one of its copies is there
+    assert "5,400 ₪" in by_copy and "5,100 ₪" not in by_copy
+
+
 def test_furniture_and_parking_criteria_are_saved(client, db):
     response = client.post(
         "/settings/criteria",
