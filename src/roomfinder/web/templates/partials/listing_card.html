@@ -1,8 +1,16 @@
 {% set l = card.listing %}
 <article class="card listing-card h-100 shadow-sm status-{{ l.status }}{% if l.removed_at %} is-removed{% endif %}" id="listing-{{ l.id }}">
   <div class="position-relative">
-    {% if l.images %}
-    <img src="{{ l.images[0] }}" class="card-img-top listing-photo" alt="" loading="lazy" referrerpolicy="no-referrer">
+    {% set photos = l.images[:10] %}
+    {% if photos %}
+    <div class="listing-gallery">
+      {% for photo in photos %}<img src="{{ photo }}" class="listing-photo" alt="" loading="lazy" referrerpolicy="no-referrer">{% endfor %}
+    </div>
+    {% if photos | length > 1 %}
+    <button type="button" class="gallery-nav gallery-prev" aria-label="התמונה הקודמת">›</button>
+    <button type="button" class="gallery-nav gallery-next" aria-label="התמונה הבאה">‹</button>
+    <span class="gallery-count"><span data-gallery-index>1</span>/<span data-gallery-total>{{ photos | length }}</span></span>
+    {% endif %}
     {% else %}
     <div class="card-img-top listing-photo listing-photo-empty">🏠</div>
     {% endif %}

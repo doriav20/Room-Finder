@@ -33,7 +33,8 @@ document.querySelector(".listing-tabs .active")?.scrollIntoView({ block: "neares
 // banner, a browser notification and a short sound.
 (function () {
   const POLL_MS = 60 * 1000;
-  const grid = document.getElementById("grid");
+  // The cards grid, or the map in its place
+  const grid = document.querySelector("[data-latest-id]");
   const button = document.getElementById("enable-notifications");
   const baseTitle = document.title;
 
@@ -90,4 +91,56 @@ document.querySelector(".listing-tabs .active")?.scrollIntoView({ block: "neares
   }
 
   setInterval(poll, POLL_MS);
+})();
+
+// The photos on a listing card. Cards also arrive later (htmx), so this listens on the page.
+(function () {
+  const galleryOf = (element) => element.closest(".position-relative")?.querySelector(".listing-gallery");
+
+  const showIndex = (gallery) => {
+    const counter = gallery.parentElement.querySelector("[data-gallery-index]");
+    if (!counter || !gallery.clientWidth) return;
+    // In a right-to-left page scrollLeft runs from 0 down to negative numbers
+    counter.textContent = Math.round(Math.abs(gallery.scrollLeft) / gallery.clientWidth) + 1;
+  };
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".gallery-nav");
+    const gallery = button && galleryOf(button);
+    if (!gallery) return;
+    const step = button.classList.contains("gallery-next") ? 1 : -1;
+    const rtl = getComputedStyle(gallery).direction === "rtl";
+    gallery.scrollBy({ left: step * (rtl ? -1 : 1) * gallery.clientWidth, behavior: "smooth" });
+  });
+
+  // Scrolling doesn't bubble, so it's caught on its way down
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (event.target instanceof Element && event.target.matches(".listing-gallery")) showIndex(event.target);
+    },
+    true,
+  );
+
+  // A photo the site no longer serves is dropped from the strip
+  document.addEventListener(
+    "error",
+    (event) => {
+      const image = event.target;
+      if (!(image instanceof HTMLImageElement) || !image.parentElement?.matches(".listing-gallery")) return;
+      const gallery = image.parentElement;
+      const frame = gallery.parentElement;
+      image.remove();
+      const left = gallery.querySelectorAll("img").length;
+      const total = frame.querySelector("[data-gallery-total]");
+      if (total) total.textContent = left;
+      if (left < 2) frame.querySelectorAll(".gallery-nav, .gallery-count").forEach((node) => node.remove());
+      if (!left) {
+        gallery.className = "card-img-top listing-photo listing-photo-empty";
+        gallery.textContent = "🏠";
+      }
+      showIndex(gallery);
+    },
+    true,
+  );
 })();

@@ -368,3 +368,57 @@ def test_listings_filter_by_official_neighborhood(client, db):
     assert '<option value="אברמוביץ&#39;">' in page
     assert "(לפי המפה: אברמוביץ&#39;)" in page  # placed by its map point, not the site's name
     assert "5,100 ₪" in only_ramaz and "5,200 ₪" not in only_ramaz
+
+
+def test_map_view_shows_the_tab_on_a_map(client, db):
+    add_listing(db, "a", price=5100)
+
+    page = client.get("/?tab=all&view=map&price_max=7000").text
+
+    assert 'id="listings-map"' in page and "listings_map.js" in page
+    assert "listing-card" not in page
+    assert 'data-src="/api/listings/map?tab=all&amp;price_max=7000&amp;view=map"' in page
+    # Switching tabs, or back to the cards, keeps the filters
+    assert 'href="?tab=new&amp;price_max=7000&amp;view=map"' in page
+    assert 'href="?tab=all&amp;price_max=7000"' in page
+
+
+def test_map_places_listings_by_their_point_a_copy_or_their_neighborhood(client, db):
+    add_listing(db, "point", latitude=31.97, longitude=34.79, price=5100, street="א")
+    original = add_listing(db, "no-point", price=5200, street="ב")
+    add_listing(
+        db, "copy", source="madlan", duplicate_of_id=original.id, latitude=31.96, longitude=34.8
+    )
+    add_listing(db, "area", area="רמז", price=5300, street="ג")
+    add_listing(db, "nowhere", neighborhood="מרכז", price=5400, street="ד")
+    add_listing(db, "expensive", latitude=31.95, longitude=34.78, price=9000, street="ה")
+
+    data = client.get("/api/listings/map?tab=all&price_max=8000").json()
+
+    by_price = {item["price"]: item for item in data["listings"]}
+    assert set(by_price) == {5100, 5200, 5300}
+    assert (by_price[5100]["lat"], by_price[5100]["approximate"]) == (31.97, False)
+    assert (by_price[5200]["lat"], by_price[5200]["lng"]) == (31.96, 34.8)
+    assert by_price[5300]["approximate"] is True
+    assert data["without_location"] == 1
+    assert data["bounds"] is not None and data["areas"] == []
+
+
+def test_map_outlines_the_chosen_neighborhoods(client, db):
+    client.post("/areas", data={"areas": ["רמז"], "unknown_area_ok": "1"})
+
+    data = client.get("/api/listings/map?tab=all").json()
+
+    assert [area["name"] for area in data["areas"]] == ["רמז"]
+
+
+def test_cards_show_every_photo(client, db):
+    photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(3)]
+    add_listing(db, "many", images=photos, price=5100)
+    add_listing(db, "one", images=photos[:1], price=5200, street="ביאליק")
+
+    page = client.get("/?tab=all").text
+
+    assert all(f'src="{photo}"' in page for photo in photos)
+    assert page.count("gallery-next") == 1  # only the card with several photos
+    assert "<span data-gallery-total>3</span>" in page

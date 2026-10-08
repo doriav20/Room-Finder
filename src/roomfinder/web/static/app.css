@@ -26,6 +26,73 @@ body {
   opacity: 0.4;
 }
 
+/* A card's photos, side by side: swiped on a phone, the arrows on a computer (app.js) */
+.listing-gallery {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.listing-gallery::-webkit-scrollbar {
+  display: none;
+}
+
+.listing-gallery .listing-photo {
+  flex: 0 0 100%;
+  width: 100%;
+  scroll-snap-align: start;
+}
+
+.gallery-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.25rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.listing-card:hover .gallery-nav,
+.gallery-nav:focus-visible {
+  opacity: 1;
+}
+
+.gallery-prev {
+  inset-inline-start: 0.5rem;
+}
+
+.gallery-next {
+  inset-inline-end: 0.5rem;
+}
+
+/* Touch screens swipe instead */
+@media (hover: none) {
+  .gallery-nav {
+    display: none;
+  }
+}
+
+.gallery-count {
+  position: absolute;
+  bottom: 0.5rem;
+  inset-inline-end: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.75rem;
+  direction: ltr;
+}
+
 .photo-badges {
   position: absolute;
   top: 0.5rem;
@@ -147,6 +214,69 @@ body {
   display: none;
 }
 
+/* The listings page's map view */
+.listings-map {
+  height: 70vh;
+  min-height: 380px;
+}
+
+.price-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  padding: 0.1rem 0.4rem;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #495057;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.price-pin.status-new {
+  background: #198754;
+}
+
+.price-pin.status-favorite {
+  background: #ffc107;
+  color: #212529;
+}
+
+.price-pin.status-contacted {
+  background: #0d6efd;
+}
+
+.price-pin.status-hidden {
+  opacity: 0.6;
+}
+
+.price-pin.approximate {
+  border-style: dashed;
+  border-color: #212529;
+}
+
+.map-popup {
+  font-family: system-ui, -apple-system, "Segoe UI", Arial, "Noto Sans Hebrew", sans-serif;
+  text-align: right;
+}
+
+.map-popup-photo {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.listings-map .leaflet-popup-content a.btn {
+  color: #fff;
+}
+
 .area-list {
   max-height: 50vh;
   overflow-y: auto;
@@ -180,6 +310,11 @@ body {
 
   .listing-tabs .nav-link {
     padding: 0.35rem 0.75rem;
+  }
+
+  .listings-map {
+    height: calc(100dvh - 15rem);
+    min-height: 320px;
   }
 
   .areas-map {

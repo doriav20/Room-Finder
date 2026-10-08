@@ -55,6 +55,8 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 STATIC_DIR = Path(__file__).parent / "static"
 
 PAGE_SIZE = 48
+# The map shows a tab's listings all at once, up to this many
+MAP_LIMIT = 1000
 PRICE_DROP_WINDOW = timedelta(days=14)
 ROOM_OPTIONS = [value / 2 for value in range(2, 17)]
 TABS = [
@@ -172,6 +174,8 @@ class ListingFilters:
     q: str = ""
     sort: str = "newest"
     all: bool = False
+    # "map" shows the listings on a map instead of as cards
+    view: str = ""
 
     @classmethod
     def from_request(cls, request: Request) -> "ListingFilters":
@@ -191,6 +195,7 @@ class ListingFilters:
             q=params.get("q", "").strip()[:MAX_QUERY_LENGTH],
             sort=sort if sort in {"newest", "price_asc", "price_desc"} else "newest",
             all=params.get("all") == "1",
+            view="map" if params.get("view") == "map" else "",
         )
 
     def query(self, **overrides: Any) -> str:
@@ -204,6 +209,7 @@ class ListingFilters:
             "q": self.q,
             "sort": self.sort if self.sort != "newest" else None,
             "all": "1" if self.all else None,
+            "view": self.view,
         } | overrides
         return urlencode({key: value for key, value in values.items() if value}, doseq=True)
 
@@ -357,7 +363,10 @@ async def listings_page(request: Request) -> HTMLResponse:
     async with _sessionmaker(request)() as session:
         counts = {key: await _count(session, _listings_query(filters, key)) for key, _ in TABS}
         tab = filters.tab or ("new" if counts["new"] else "all")
-        cards, next_offset = await _page_of_cards(session, filters, tab, 0)
+        # The map fetches its listings itself (listings_map below)
+        cards, next_offset = (
+            ([], None) if filters.view == "map" else await _page_of_cards(session, filters, tab, 0)
+        )
         # Listings whose ad text wasn't read yet: a search sees only their title and address
         without_text = 0
         if filters.search:
@@ -374,6 +383,7 @@ async def listings_page(request: Request) -> HTMLResponse:
             "cards": cards,
             "next_offset": next_offset,
             "page_query": filters.query(tab=tab),
+            "view_query": lambda view: filters.query(tab=tab, view=view),
             "areas": await _known_areas(session),
             "latest_id": await session.scalar(select(func.max(Listing.id))) or 0,
             "criteria_summary": _criteria_summary(await get_criteria(session)),
@@ -394,6 +404,84 @@ async def more_cards(request: Request, offset: int = 0) -> HTMLResponse:
         "search": filters.search,
     }
     return render_partial(request, "partials/listing_cards.html", context)
+
+
+def _map_point(listing: Listing, copies: list[Listing]) -> tuple[float, float, bool] | None:
+    """Where to put a listing on the map: its own point, a copy's from another site, or
+    (approximately) the middle of its neighborhood. The flag says it's approximate."""
+    for candidate in (listing, *copies):
+        if candidate.latitude is not None and candidate.longitude is not None:
+            return candidate.latitude, candidate.longitude, False
+    city_map = areas.city_map(listing.city)
+    if listing.area and city_map:
+        for area in city_map.areas:
+            if area.name == listing.area:
+                return *area.label_point, True
+    return None
+
+
+@router.get("/api/listings/map")
+async def listings_map(request: Request) -> JSONResponse:
+    """A tab's listings with where they are, for the map view of the listings page."""
+    filters = ListingFilters.from_request(request)
+    tab = filters.tab or "all"
+    labels = _source_labels(request)
+    async with _sessionmaker(request)() as session:
+        query = _ordered(_listings_query(filters, tab), filters.sort)
+        listings = list(await session.scalars(query.limit(MAP_LIMIT)))
+        copies: defaultdict[int, list[Listing]] = defaultdict(list)
+        if listings:
+            for copy in await session.scalars(
+                select(Listing).where(
+                    Listing.duplicate_of_id.in_([listing.id for listing in listings])
+                )
+            ):
+                copies[copy.duplicate_of_id].append(copy)
+        criteria = await get_criteria(session)
+    points = []
+    without_location = 0
+    for listing in listings:
+        point = _map_point(listing, copies[listing.id])
+        if point is None:
+            without_location += 1
+            continue
+        lat, lng, approximate = point
+        points.append(
+            {
+                "id": listing.id,
+                "lat": lat,
+                "lng": lng,
+                "approximate": approximate,
+                "price": listing.price,
+                "rooms": listing.rooms,
+                "sqm": listing.sqm,
+                "address": formatting.address(listing),
+                "area": listing.area,
+                "image": listing.images[0] if listing.images else None,
+                "url": listing.url,
+                "status": listing.status,
+                "source": labels.get(listing.source, listing.source),
+            }
+        )
+    city_map = areas.city_map(criteria.city)
+    outlines = []
+    bounds = None
+    if city_map:
+        west, south, east, north = city_map.bounds
+        bounds = [[south, west], [north, east]]
+        outlines = [
+            {"name": area.name, "outline": [[lat, lon] for lon, lat in area.ring]}
+            for area in city_map.areas
+            if area.name in criteria.areas
+        ]
+    return JSONResponse(
+        {
+            "listings": points,
+            "without_location": without_location,
+            "areas": outlines,
+            "bounds": bounds,
+        }
+    )
 
 
 @router.post("/listings/{listing_id}/status", response_class=HTMLResponse)

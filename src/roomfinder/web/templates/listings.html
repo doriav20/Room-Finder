@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}מודעות · RoomFinder{% endblock %}
+{% block head %}{% if filters.view == 'map' %}<link rel="stylesheet" href="{{ static_url('vendor/leaflet/leaflet.css') }}">{% endif %}{% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
   <h1 class="h3 mb-0">מודעות</h1>
@@ -12,7 +13,8 @@
   <a class="btn btn-sm btn-success ms-auto" href="/?tab=new">הצג</a>
 </div>
 
-<ul class="nav nav-pills mb-3 gap-1 listing-tabs">
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+<ul class="nav nav-pills gap-1 listing-tabs">
   {% for key, label, count in tabs %}
   <li class="nav-item">
     <a class="nav-link{% if key == tab %} active{% endif %}" href="?{{ tab_query(key) }}">
@@ -21,9 +23,15 @@
   </li>
   {% endfor %}
 </ul>
+<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="תצוגה">
+  <a class="btn {% if filters.view == 'map' %}btn-outline-secondary{% else %}btn-secondary{% endif %}" href="?{{ view_query('') }}"{% if filters.view != 'map' %} aria-current="page"{% endif %}>📋 רשימה</a>
+  <a class="btn {% if filters.view == 'map' %}btn-secondary{% else %}btn-outline-secondary{% endif %}" href="?{{ view_query('map') }}"{% if filters.view == 'map' %} aria-current="page"{% endif %}>🗺 מפה</a>
+</div>
+</div>
 
 <form class="row g-2 align-items-end mb-4" method="get" action="/">
   <input type="hidden" name="tab" value="{{ tab }}">
+  {% if filters.view %}<input type="hidden" name="view" value="{{ filters.view }}">{% endif %}
   <div class="col-12">
     <label class="visually-hidden" for="f-q">חיפוש בטקסט המודעה</label>
     <div class="input-group input-group-sm">
@@ -119,7 +127,7 @@
   </div>
 </form>
 
-{% if tab == 'new' and cards %}
+{% if tab == 'new' and tabs[0][2] %}
 <form method="post" action="/listings/mark-seen" class="mb-3">
   <button class="btn btn-sm btn-outline-secondary">✔ סמן את כל החדשות כנראו</button>
 </form>
@@ -130,13 +138,30 @@
   ℹ️ ל-{{ without_text }} מודעות בלשונית הזו עוד אין טקסט מודעה, ולכן החיפוש בדק בהן רק את הכותרת והכתובת. הטקסט נקרא בהדרגה, כמה מודעות בכל בדיקה.
 </div>
 {% endif %}
+{% if filters.view == 'map' %}
+<div class="card shadow-sm overflow-hidden">
+  <div id="listings-map" class="listings-map" dir="ltr" role="region" aria-label="מפת המודעות"
+       data-src="/api/listings/map?{{ page_query }}" data-latest-id="{{ latest_id }}"></div>
+  <div class="card-footer bg-body small text-body-secondary" id="listings-map-note">
+    לחיצה על מחיר פותחת את פרטי המודעה. מסגרת מקווקוות: מיקום משוער, באמצע השכונה שבמודעה.
+  </div>
+</div>
+{% else %}
 <div id="grid" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3" data-latest-id="{{ latest_id }}">
   {% include "partials/listing_cards.html" %}
 </div>
-{% if not cards %}
+{% endif %}
+{% if not cards and filters.view != 'map' %}
 <div class="text-center text-body-secondary py-5">
   {% if filters.q %}אין מודעות שמתאימות לחיפוש "{{ filters.q }}".
   {% elif tab == 'new' %}אין מודעות חדשות כרגע. ההתראה תגיע ברגע שתתפרסם אחת.{% else %}אין מודעות להצגה.{% endif %}
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if filters.view == 'map' %}
+<script src="{{ static_url('vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ static_url('listings_map.js') }}"></script>
 {% endif %}
 {% endblock %}

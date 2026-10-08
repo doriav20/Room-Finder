@@ -42,9 +42,13 @@ def make_listing(**overrides) -> Listing:
 
 
 class FakeBot:
-    def __init__(self, photo_error: Exception | None = None) -> None:
+    def __init__(
+        self, photo_error: Exception | None = None, album_error: Exception | None = None
+    ) -> None:
         self.photo_error = photo_error
+        self.album_error = album_error
         self.photos: list[dict] = []
+        self.albums: list[dict] = []
         self.messages: list[dict] = []
 
     async def send_photo(self, chat_id, **kwargs):
@@ -52,6 +56,11 @@ class FakeBot:
             raise self.photo_error
         self.photos.append({"chat_id": chat_id} | kwargs)
         return SimpleNamespace(message_id=len(self.photos))
+
+    async def send_media_group(self, chat_id, media, **kwargs):
+        if self.album_error:
+            raise self.album_error
+        self.albums.append({"chat_id": chat_id, "media": media} | kwargs)
 
     async def send_message(self, chat_id, text, **kwargs):
         self.messages.append({"chat_id": chat_id, "text": text} | kwargs)
@@ -179,6 +188,17 @@ def test_keyboard_reflects_listing_status():
     assert keyboard[0][0].url == "https://www.yad2.co.il/realestate/item/abc"
     assert [button.text for button in keyboard[1]] == ["✅ במועדפים", "🙈 לא רלוונטי"]
     assert [button.callback_data for button in keyboard[1]] == ["fav:7", "hide:7"]
+    assert len(keyboard[0]) == 1  # one photo, and the message shows it
+
+
+def test_keyboard_offers_the_rest_of_the_photos():
+    photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(15)]
+
+    [link, more] = listing_keyboard(make_listing(images=photos)).inline_keyboard[0]
+    [_, one_more] = listing_keyboard(make_listing(images=photos[:2])).inline_keyboard[0]
+
+    assert (more.text, more.callback_data) == ("📷 עוד 10 תמונות", "photos:7")
+    assert one_more.text == "📷 עוד תמונה"
 
 
 async def test_each_link_allows_one_more_user_and_users_can_be_removed(service):
@@ -304,3 +324,53 @@ async def test_buttons_toggle_status_for_allowed_users_only(paired, session):
     update, _ = press(OWNER_ID, f"fav:{listing_id}")
     await paired._on_button(update, None)
     assert await status_now() == ListingStatus.SEEN
+
+
+def photos_press(listing_id: int, user_id: int = OWNER_ID):
+    answer = Recorder()
+    query = SimpleNamespace(
+        from_user=SimpleNamespace(id=user_id),
+        data=f"photos:{listing_id}",
+        answer=answer,
+        message=SimpleNamespace(chat=SimpleNamespace(id=OWNER_ID), message_id=55),
+    )
+    return SimpleNamespace(callback_query=query), answer
+
+
+async def test_more_photos_button_sends_an_album_in_reply(paired, session):
+    photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(4)]
+    listing = make_listing(id=None, images=photos)
+    session.add(listing)
+    await session.commit()
+
+    update, answer = photos_press(listing.id, STRANGER_ID)
+    await paired._on_button(update, None)
+    assert paired.bot.albums == [] and answer.calls == []
+
+    update, answer = photos_press(listing.id)
+    await paired._on_button(update, None)
+
+    [album] = paired.bot.albums
+    assert [item.media for item in album["media"]] == photos[1:]
+    assert album["reply_parameters"].message_id == 55
+    assert len(answer.calls) == 1
+
+
+async def test_more_photos_are_sent_one_by_one_when_the_album_fails(paired, session):
+    paired.bot = FakeBot(album_error=BadRequest("Wrong file identifier/http url specified"))
+    photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(3)]
+    listing = make_listing(id=None, images=photos)
+    session.add(listing)
+    await session.commit()
+
+    update, _ = photos_press(listing.id)
+    await paired._on_button(update, None)
+
+    assert [photo["photo"] for photo in paired.bot.photos] == photos[1:]
+
+    paired.bot = FakeBot(
+        photo_error=BadRequest("Wrong file identifier/http url specified"),
+        album_error=BadRequest("Wrong file identifier/http url specified"),
+    )
+    await paired._on_button(update, None)
+    assert paired.bot.messages[0]["text"].startswith("לא הצלחתי לשלוח את התמונות")

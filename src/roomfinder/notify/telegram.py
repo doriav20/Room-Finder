@@ -16,7 +16,16 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message, Update
+from telegram import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    LinkPreviewOptions,
+    Message,
+    ReplyParameters,
+    Update,
+)
 from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -44,6 +53,8 @@ from roomfinder.settings_store import get_preferences, save_preferences
 log = logging.getLogger(__name__)
 
 CAPTION_LIMIT = 1024
+# Telegram's most photos in one album
+ALBUM_LIMIT = 10
 PAIRING_TTL = timedelta(minutes=10)
 HELP_TEXT = (
     "פקודות:\n"
@@ -146,12 +157,22 @@ def format_price_drop(listing: Listing, source_label: str, old_price: int, new_p
     return "\n".join(lines + _listing_details(listing))[:CAPTION_LIMIT]
 
 
+def more_photos(listing: Listing) -> list[str]:
+    """The listing's photos after the one its message shows, as many as fit in an album."""
+    return listing.images[1 : 1 + ALBUM_LIMIT]
+
+
 def listing_keyboard(listing: Listing) -> InlineKeyboardMarkup:
     favorite = listing.status == ListingStatus.FAVORITE
     hidden = listing.status == ListingStatus.HIDDEN
+    top = [InlineKeyboardButton("🔗 למודעה", url=listing.url)]
+    # An album can't carry buttons, so the rest of the photos come on request
+    if photos := more_photos(listing):
+        label = f"📷 עוד {len(photos)} תמונות" if len(photos) > 1 else "📷 עוד תמונה"
+        top.append(InlineKeyboardButton(label, callback_data=f"photos:{listing.id}"))
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔗 למודעה", url=listing.url)],
+            top,
             [
                 InlineKeyboardButton(
                     "✅ במועדפים" if favorite else "⭐ שמור", callback_data=f"fav:{listing.id}"
@@ -429,6 +450,9 @@ class TelegramService:
         if query is None or not await self.is_allowed(query.from_user.id):
             return
         action, _, listing_id = (query.data or "").partition(":")
+        if action == "photos" and listing_id.isdigit():
+            await self._send_more_photos(query, int(listing_id))
+            return
         wanted = {"fav": ListingStatus.FAVORITE, "hide": ListingStatus.HIDDEN}.get(action)
         if wanted is None or not listing_id.isdigit():
             await query.answer()
@@ -447,6 +471,47 @@ class TelegramService:
         }
         await query.answer(answers.get(ListingStatus(listing.status), "בוטל"))
         await query.edit_message_reply_markup(listing_keyboard(listing))
+
+    async def _send_more_photos(self, query: CallbackQuery, listing_id: int) -> None:
+        """Send the rest of a listing's photos as a reply to its message."""
+        async with self.sessionmaker() as session:
+            listing = await session.get(Listing, listing_id)
+        photos = more_photos(listing) if listing else []
+        if not photos or query.message is None:
+            await query.answer("אין עוד תמונות")
+            return
+        await query.answer()
+        chat_id = query.message.chat.id
+        reply = ReplyParameters(
+            message_id=query.message.message_id, allow_sending_without_reply=True
+        )
+        if len(photos) > 1:
+            try:
+                await self.bot.send_media_group(
+                    chat_id,
+                    [InputMediaPhoto(photo) for photo in photos],
+                    disable_notification=True,
+                    reply_parameters=reply,
+                )
+                return
+            except BadRequest as exc:
+                # One photo Telegram can't fetch fails the whole album
+                log.info("Sending the album failed (%s); sending the photos one by one", exc)
+        sent = 0
+        for photo in photos:
+            try:
+                await self.bot.send_photo(
+                    chat_id, photo=photo, disable_notification=True, reply_parameters=reply
+                )
+                sent += 1
+            except BadRequest as exc:
+                log.info("Sending a photo failed (%s)", exc)
+        if not sent:
+            await self.bot.send_message(
+                chat_id,
+                "לא הצלחתי לשלוח את התמונות. אפשר לראות אותן במודעה.",
+                reply_parameters=reply,
+            )
 
     async def _allowed_message(self, update: Update) -> bool:
         user = update.effective_user
