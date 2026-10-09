@@ -29,7 +29,8 @@
   {% endfor %}
 </ul>
 
-<form class="row g-2 align-items-end mb-4" method="get" action="/">
+<div class="filters-panel mb-3 mb-md-4">
+<form class="row g-2 align-items-end" method="get" action="/">
   <input type="hidden" name="tab" value="{{ tab }}">
   {% if filters.view %}<input type="hidden" name="view" value="{{ filters.view }}">{% endif %}
   <div class="col-12">
@@ -126,6 +127,20 @@
     </div>
   </div>
 </form>
+</div>
+
+{# On a phone the filters are folded away; what's set shows here, each removable with a tap #}
+{% if filters.active_count %}
+<div class="d-flex flex-wrap gap-1 mb-3 d-md-none active-filters">
+  {% if filters.sources %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(source=None) }}">{% for name in filters.sources %}{{ source_labels.get(name, name) }}{% if not loop.last %}, {% endif %}{% endfor %} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.area %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(area=None) }}">📍 {{ filters.area }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.price_max %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(price_max=None) }}">עד {{ filters.price_max | price }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.furnished %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(furnished=None) }}">🛋 {{ 'מרוהטת' if filters.furnished == 'yes' else 'לא מרוהטת' }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.parking %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(parking=None) }}">🚗 {{ 'עם חניה' if filters.parking == 'yes' else 'בלי חניה' }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.all %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(all=None) }}">גם שלא מתאימות <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.sort != 'newest' %}<a class="filter-chip" title="הסרת הסינון" href="?{{ filters.query(sort=None) }}">{{ 'מהזול' if filters.sort == 'price_asc' else 'מהיקר' }} <span aria-hidden="true">✕</span></a>{% endif %}
+</div>
+{% endif %}
 
 {% if tab == 'new' and tabs[0][2] %}
 <form method="post" action="/listings/mark-seen" class="mb-3">
