@@ -21,6 +21,7 @@ from roomfinder.auth import (
     start_session,
     user_for_token,
     valid_invite,
+    validate_password,
     verify_password,
 )
 from roomfinder.db import utcnow
@@ -140,6 +141,7 @@ async def test_register_creates_an_account_with_the_invite_role(session):
         ("a", PASSWORD, PASSWORD, "3-32"),
         ("with space", PASSWORD, PASSWORD, "3-32"),
         ("noa", "short", "short", "לפחות"),
+        ("noa", "onlylowercase", "onlylowercase", "סוגי תווים"),
         ("noa", PASSWORD, PASSWORD + "x", "לא זהות"),
         ("noa-noa-noa", "noa-noa-noa", "noa-noa-noa", "שם המשתמש"),
     ],
@@ -151,6 +153,30 @@ async def test_register_rejects_bad_details(session, username, password, confirm
     with pytest.raises(AuthError, match=message):
         await register(session, invite, username, password, confirm)
     assert invite.used_at is None
+
+
+@pytest.mark.parametrize(
+    ("password", "accepted"),
+    [
+        ("onlylowercase", False),
+        ("ONLYUPPERCASE", False),
+        ("1234567890", False),
+        ("!@#$%^&*()", False),
+        ("דירהבתלאביב", False),  # letters without case count as lowercase
+        ("MixedCaseLetters", True),
+        ("lowercase123", True),
+        ("UPPERCASE!!", True),
+        ("correct horse battery", True),  # a space is a symbol
+        ("דירהבתלאביב2026", True),
+        ("דירה בתל אביב", True),
+    ],
+)
+def test_passwords_need_two_kinds_of_characters(password, accepted):
+    if accepted:
+        validate_password(password, password)
+    else:
+        with pytest.raises(AuthError, match="סוגי תווים"):
+            validate_password(password, password)
 
 
 async def test_reset_link_sets_a_new_password_and_signs_out_everywhere(session):

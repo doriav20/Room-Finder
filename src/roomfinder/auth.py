@@ -27,6 +27,8 @@ INVITE_LIFETIME = timedelta(days=3)
 RESET_LIFETIME = timedelta(hours=24)
 MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 256
+# Of: uppercase letters, lowercase letters, digits, symbols
+MIN_PASSWORD_KINDS = 2
 USERNAME_PATTERN = re.compile(r"^[\w.\-]{3,32}$")
 
 _hasher = PasswordHasher()
@@ -57,11 +59,32 @@ def username_key(username: str) -> str:
     return username.strip().casefold()
 
 
+def _character_kinds(password: str) -> int:
+    kinds = set()
+    for char in password:
+        if char.isdigit():
+            kinds.add("digit")
+        elif char.isupper():
+            kinds.add("upper")
+        elif char.isalpha():
+            # Letters without case, like Hebrew, count as lowercase
+            kinds.add("lower")
+        else:
+            # Spaces too, so a short sentence still works
+            kinds.add("symbol")
+    return len(kinds)
+
+
 def validate_password(password: str, confirm: str, username: str | None = None) -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise AuthError(f"הסיסמה צריכה להיות לפחות {MIN_PASSWORD_LENGTH} תווים")
     if len(password) > MAX_PASSWORD_LENGTH:
         raise AuthError("הסיסמה ארוכה מדי")
+    if _character_kinds(password) < MIN_PASSWORD_KINDS:
+        raise AuthError(
+            f"הסיסמה צריכה לכלול לפחות {MIN_PASSWORD_KINDS} סוגי תווים מתוך: "
+            "אותיות גדולות, אותיות קטנות, ספרות, סימנים"
+        )
     if password != confirm:
         raise AuthError("הסיסמאות לא זהות")
     if username and password.casefold() == username.casefold():
