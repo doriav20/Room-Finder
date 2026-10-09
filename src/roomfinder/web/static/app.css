@@ -162,6 +162,110 @@ body {
 .notes {
   resize: vertical;
   font-size: 0.85rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* A card's buttons: the site's link, then the three that set its status, side by side */
+.listing-actions {
+  display: grid;
+  grid-template-columns: 1.25fr repeat(3, 1fr);
+  gap: 0.375rem;
+}
+
+.listing-actions .btn {
+  white-space: nowrap;
+  padding-inline: 0.25rem;
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  opacity: 0.5;
+  margin-bottom: 0.5rem;
+}
+
+/* Over the page's bottom corner on a long list (app.js shows it) */
+.back-to-top {
+  position: fixed;
+  z-index: 1020;
+  inset-inline-end: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  opacity: 0.9;
+}
+
+/* The tab bar at the bottom of a phone's screen (base.html) */
+.bottom-nav {
+  position: fixed;
+  z-index: 1030;
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(var(--bs-body-bg-rgb), 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: var(--bs-border-width) solid var(--bs-border-color);
+}
+
+.bottom-nav a {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-height: 3.5rem;
+  padding: 0.4rem 0.25rem 0.35rem;
+  font-size: 0.7rem;
+  color: var(--bs-secondary-color);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav-icon {
+  font-size: 1.25rem;
+  line-height: 1.2;
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+.bottom-nav a.active {
+  color: var(--bs-primary);
+  font-weight: 600;
+}
+
+.bottom-nav a.active .bottom-nav-icon {
+  filter: none;
+  opacity: 1;
+}
+
+.bottom-nav a.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline: 25%;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--bs-primary);
+}
+
+.bottom-nav-alert {
+  position: absolute;
+  top: 0.25rem;
+  inset-inline-start: calc(50% + 0.5rem);
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--bs-danger);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  text-align: center;
 }
 
 /* Neighborhoods page */
@@ -286,10 +390,39 @@ body {
 
 /* Phones */
 @media (max-width: 767.98px) {
+  /* Room for the tab bar at the bottom, and the top bar scrolls away with the page */
+  body.has-bottom-nav {
+    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+  }
+
+  body.has-bottom-nav .navbar.sticky-top {
+    position: static;
+  }
+
+  body.has-bottom-nav .back-to-top {
+    bottom: calc(4.25rem + env(safe-area-inset-bottom));
+  }
+
+  /* The tab bar has the main pages; the menu at the top keeps the rest */
+  .navbar .nav-primary {
+    display: none;
+  }
+
+  .criteria-summary {
+    order: 1;
+    flex-basis: 100%;
+    font-size: 0.875rem;
+  }
+
   /* iOS zooms into any field with text smaller than 16px when it gets focus */
   .form-control,
   .form-select {
     font-size: 1rem;
+  }
+
+  /* Big enough for a thumb */
+  .listing-actions .btn {
+    padding-block: 0.45rem;
   }
 
   .listing-photo {
@@ -309,7 +442,7 @@ body {
   }
 
   .listings-map {
-    height: calc(100dvh - 15rem);
+    height: calc(100dvh - 22rem - env(safe-area-inset-bottom));
     min-height: 320px;
   }
 

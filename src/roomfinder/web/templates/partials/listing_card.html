@@ -54,19 +54,21 @@
       {% for dup in card.duplicates %}<a href="{{ dup.url }}" target="_blank" rel="noopener noreferrer">{{ source_labels.get(dup.source, dup.source) }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
     </div>
     {% endif %}
-    <textarea class="form-control form-control-sm mt-2 notes" name="notes" rows="1" placeholder="הערות…"
+    <textarea class="form-control form-control-sm mt-2 notes" name="notes" rows="1" placeholder="הערות…" aria-label="הערות"
               hx-post="/listings/{{ l.id }}/notes" hx-trigger="change" hx-swap="none">{{ l.notes or '' }}</textarea>
   </div>
-  <div class="card-footer bg-body d-flex gap-1 flex-wrap">
+  {# Labelled, not only icons: a phone shows no tooltips. Pressing a lit button again undoes it #}
+  <div class="card-footer bg-body listing-actions">
     <a class="btn btn-sm btn-primary" href="{{ l.url }}" target="_blank" rel="noopener noreferrer">למודעה ↗</a>
-    <button class="btn btn-sm {% if l.status == 'favorite' %}btn-warning{% else %}btn-outline-warning{% endif %}"
-            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "favorite"}'
-            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="מועדפים">⭐</button>
-    <button class="btn btn-sm {% if l.status == 'contacted' %}btn-success{% else %}btn-outline-success{% endif %}"
-            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "contacted"}'
-            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="יצרתי קשר">📞</button>
-    <button class="btn btn-sm {% if l.status == 'hidden' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "hidden"}'
-            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="לא רלוונטי">🙈</button>
+    {% for status, icon, label, title, color in [
+      ('favorite', '⭐', 'מועדף', 'מועדפים', 'warning'),
+      ('contacted', '📞', 'פניתי', 'יצרתי קשר', 'success'),
+      ('hidden', '🙈', 'הסתר', 'לא רלוונטי', 'secondary'),
+    ] %}
+    <button class="btn btn-sm {% if l.status == status %}btn-{{ color }}{% else %}btn-outline-{{ color }}{% endif %}"
+            hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "{{ status }}"}' hx-disabled-elt="this"
+            hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="{{ title }}"
+            aria-pressed="{{ 'true' if l.status == status else 'false' }}"><span aria-hidden="true">{{ icon }}</span> {{ label }}</button>
+    {% endfor %}
   </div>
 </article>

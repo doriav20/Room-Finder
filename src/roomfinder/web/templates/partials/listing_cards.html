@@ -3,8 +3,11 @@
 {% endfor %}
 {% if next_offset is not none %}
 <div class="col-12 text-center" id="load-more">
+  {# Loads by itself as it scrolls into view; the button is there if that doesn't happen #}
   <button class="btn btn-outline-primary"
-          hx-get="/listings/cards?{{ page_query }}&offset={{ next_offset }}"
-          hx-target="#load-more" hx-swap="outerHTML">טען עוד</button>
+          hx-get="/listings/cards?{{ page_query }}&offset={{ next_offset }}" hx-trigger="click, revealed"
+          hx-target="#load-more" hx-swap="outerHTML" hx-disabled-elt="this">
+    <span class="spinner-border spinner-border-sm htmx-indicator" aria-hidden="true"></span> טען עוד
+  </button>
 </div>
 {% endif %}

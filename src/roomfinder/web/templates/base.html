@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 {% include "partials/theme_head.html" %}
   <title>{% block title %}RoomFinder{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏠</text></svg>">
@@ -12,7 +12,7 @@
   <script src="{{ static_url('app.js') }}" defer></script>
   {% block head %}{% endblock %}
 </head>
-<body class="bg-body-tertiary">
+<body class="bg-body-tertiary has-bottom-nav">
   <nav class="navbar navbar-expand-xl bg-body border-bottom sticky-top">
     <div class="container-xl">
       <a class="navbar-brand fw-bold" href="/">🏠 RoomFinder</a>
@@ -24,10 +24,10 @@
       </button>
       <div class="collapse navbar-collapse" id="main-nav">
         <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link{% if active == 'listings' %} active fw-semibold{% endif %}" href="/">מודעות</a></li>
-          <li class="nav-item"><a class="nav-link{% if active == 'areas' %} active fw-semibold{% endif %}" href="/areas">שכונות</a></li>
-          <li class="nav-item"><a class="nav-link{% if active == 'sources' %} active fw-semibold{% endif %}" href="/sources">מקורות</a></li>
-          <li class="nav-item"><a class="nav-link{% if active == 'settings' %} active fw-semibold{% endif %}" href="/settings">הגדרות</a></li>
+          <li class="nav-item nav-primary"><a class="nav-link{% if active == 'listings' %} active fw-semibold{% endif %}"{% if active == 'listings' %} aria-current="page"{% endif %} href="/">מודעות</a></li>
+          <li class="nav-item nav-primary"><a class="nav-link{% if active == 'areas' %} active fw-semibold{% endif %}"{% if active == 'areas' %} aria-current="page"{% endif %} href="/areas">שכונות</a></li>
+          <li class="nav-item nav-primary"><a class="nav-link{% if active == 'sources' %} active fw-semibold{% endif %}"{% if active == 'sources' %} aria-current="page"{% endif %} href="/sources">מקורות</a></li>
+          <li class="nav-item nav-primary"><a class="nav-link{% if active == 'settings' %} active fw-semibold{% endif %}"{% if active == 'settings' %} aria-current="page"{% endif %} href="/settings">הגדרות</a></li>
           {% if current_user.is_admin %}
           <li class="nav-item"><a class="nav-link{% if active == 'users' %} active fw-semibold{% endif %}" href="/users">משתמשים</a></li>
           {% endif %}
@@ -54,6 +54,24 @@
   <main class="container-xl py-3 py-md-4">
     {% block content %}{% endblock %}
   </main>
+
+  {# On a phone the main pages are a tap away at the bottom, where a thumb reaches;
+     the menu at the top keeps the rest #}
+  <nav class="bottom-nav d-md-none" aria-label="ניווט">
+    {% for key, href, icon, label in [
+      ('listings', '/', '🏠', 'מודעות'),
+      ('areas', '/areas', '📍', 'שכונות'),
+      ('sources', '/sources', '📡', 'מקורות'),
+      ('settings', '/settings', '⚙️', 'הגדרות'),
+      ('account', '/account', '👤', 'חשבון'),
+    ] %}
+    <a href="{{ href }}"{% if active == key %} class="active" aria-current="page"{% endif %}>
+      <span class="bottom-nav-icon" aria-hidden="true">{{ icon }}</span>
+      <span>{{ label }}</span>
+      {% if key == 'sources' and header.failing %}<span class="bottom-nav-alert" title="{{ header.failing }} מקורות בבעיה">{{ header.failing }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </nav>
   {% block scripts %}{% endblock %}
 </body>
 </html>

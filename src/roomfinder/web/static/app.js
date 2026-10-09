@@ -187,3 +187,35 @@ document.querySelector(".listing-tabs .active")?.scrollIntoView({ block: "neares
     true,
   );
 })();
+
+// A card's notes save when the field is left; a green or red frame says whether they did
+document.addEventListener("htmx:afterRequest", (event) => {
+  const field = event.detail.elt;
+  if (!(field instanceof HTMLTextAreaElement) || !field.matches(".notes")) return;
+  field.classList.remove("is-valid", "is-invalid");
+  field.classList.add(event.detail.successful ? "is-valid" : "is-invalid");
+  if (event.detail.successful) setTimeout(() => field.classList.remove("is-valid"), 2000);
+});
+
+// A button back to the top, once a long list has been scrolled well down
+(function () {
+  const button = document.getElementById("back-to-top");
+  if (!button) return;
+  let ticking = false;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        button.hidden = window.scrollY < window.innerHeight * 1.5;
+        ticking = false;
+      });
+    },
+    { passive: true },
+  );
+  button.addEventListener("click", () => {
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: still ? "auto" : "smooth" });
+  });
+})();
