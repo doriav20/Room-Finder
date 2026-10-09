@@ -20,9 +20,10 @@ from roomfinder.main import configure_logging
 from roomfinder.models import InviteKind, Role, User
 from roomfinder.notify import LogNotifier, Notifier
 from roomfinder.notify.telegram import TelegramService
-from roomfinder.runner import SourceRunner
-from roomfinder.settings_store import get_criteria
+from roomfinder.runner import SourceRunner, fetch_plan, get_source_state
+from roomfinder.searchers import load_searchers
 from roomfinder.sources import build_sources
+from roomfinder.sources.base import FetchResult
 
 
 @contextlib.asynccontextmanager
@@ -43,18 +44,29 @@ async def notifier_for(
 
 
 async def fetch(source_name: str, limit: int) -> None:
-    """Load a source and print what it returns, without storing or notifying."""
+    """Load a source the way a check does and print what it returns, without storing or
+    notifying."""
     settings = get_settings()
     source = build_sources()[source_name]
     engine = create_engine(settings.sqlalchemy_url)
     async with create_sessionmaker(engine)() as session:
-        criteria = await get_criteria(session)
+        state = await get_source_state(session, source_name)
+        plan = fetch_plan(await load_searchers(session), state.custom_url)
+        custom_url = state.custom_url
     await engine.dispose()
+    if not plan:
+        print("Nobody is searching yet - create a user with: python -m roomfinder invite --admin")
+        return
 
     browser = BrowserManager(settings.cdp_url)
     try:
         async with browser.session() as page:
-            result = await source.fetch(page, criteria, None)
+            result = FetchResult([])
+            for search in plan:
+                print(f"Searching {source.label} with {search.fetch_fields()}")
+                found = await source.fetch(page, search, custom_url)
+                result.listings += found.listings
+                result.complete = result.complete and found.complete
     finally:
         await browser.stop()
 
@@ -87,10 +99,13 @@ async def notify_test() -> None:
     engine = create_engine(settings.sqlalchemy_url)
     sessionmaker = create_sessionmaker(engine)
     try:
+        async with sessionmaker() as session:
+            users = list(await session.scalars(select(User.id).where(User.is_active.is_(True))))
         async with notifier_for(settings, sessionmaker) as notifier:
             if isinstance(notifier, TelegramService) and not await notifier.allowed_chat_ids():
                 print("No Telegram user is connected yet - create a link in the dashboard")
-            await notifier.message("✅ הודעת בדיקה מ-RoomFinder")
+            for user_id in users:
+                await notifier.message(user_id, "✅ הודעת בדיקה מ-RoomFinder")
     finally:
         await engine.dispose()
 
@@ -169,7 +184,7 @@ def main() -> None:
     run_parser = commands.add_parser("run", help="check a source: store and notify")
     run_parser.add_argument("source", choices=source_names)
 
-    commands.add_parser("notify-test", help="send a test message to the connected users")
+    commands.add_parser("notify-test", help="send a test message to every connected user")
 
     args = parser.parse_args()
     settings = get_settings()

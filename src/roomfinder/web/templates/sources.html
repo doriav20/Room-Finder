@@ -2,6 +2,9 @@
 {% block title %}מקורות · RoomFinder{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">מקורות</h1>
+{% if not current_user.is_admin %}
+<p class="text-body-secondary small">האתרים משותפים לכל המשתמשים, ורק מנהלים יכולים לבדוק, לכבות או לשנות אותם. את החיפוש שלך משנים ב<a href="/settings">הגדרות</a>.</p>
+{% endif %}
 
 <div class="card shadow-sm mb-4">
   <div class="table-responsive">
@@ -41,7 +44,19 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-4">
+  <div class="col-lg-4 d-flex flex-column gap-4">
+    {% if current_user.is_admin %}
+    <div class="card shadow-sm">
+      <div class="card-header bg-body fw-semibold">🧩 החיפוש המשולב</div>
+      <div class="card-body">
+        {% for search in combined %}<p class="mb-1">{{ search }}</p>{% else %}<p class="mb-1 text-body-secondary">אין משתמשים פעילים, ולכן אין מה לחפש.</p>{% endfor %}
+        <p class="small text-body-secondary mb-0 mt-2">
+          כל אתר נבדק פעם אחת בשביל כל המשתמשים ({{ searching_users }} פעילים), בחיפוש אחד שמכסה את החיפושים של כולם.
+          כל מודעה נבדקת אחר כך מול החיפוש של כל משתמש, וההתראה מגיעה רק למי שהיא מתאימה לו.
+        </p>
+      </div>
+    </div>
+    {% endif %}
     <div class="card shadow-sm">
       <div class="card-header bg-body fw-semibold">הדפדפן של המערכת</div>
       <div class="card-body">

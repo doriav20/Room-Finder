@@ -1,5 +1,5 @@
 {% set l = card.listing %}
-<article class="card listing-card h-100 shadow-sm status-{{ l.status }}{% if l.removed_at %} is-removed{% endif %}" id="listing-{{ l.id }}">
+<article class="card listing-card h-100 shadow-sm status-{{ card.status }}{% if l.removed_at %} is-removed{% endif %}" id="listing-{{ l.id }}">
   <div class="position-relative">
     {% set photos = l.images[:10] %}
     {% if photos %}
@@ -16,10 +16,10 @@
     {% endif %}
     <div class="photo-badges">
       <span class="badge text-bg-dark">{{ source_labels.get(l.source, l.source) }}</span>
-      {% if l.status == 'new' %}<span class="badge text-bg-success">חדש</span>{% endif %}
+      {% if card.status == 'new' %}<span class="badge text-bg-success">חדש</span>{% endif %}
       {% if card.price_drop %}<span class="badge text-bg-danger">📉 ירד מ-{{ card.price_drop | price }}</span>{% endif %}
       {% if l.removed_at %}<span class="badge text-bg-secondary">הוסרה</span>{% endif %}
-      {% if not l.matches %}<span class="badge text-bg-warning">לא מתאימה לחיפוש</span>{% endif %}
+      {% if not card.matches %}<span class="badge text-bg-warning">לא מתאימה לחיפוש שלך</span>{% endif %}
     </div>
   </div>
   <div class="card-body">
@@ -55,7 +55,7 @@
     </div>
     {% endif %}
     <textarea class="form-control form-control-sm mt-2 notes" name="notes" rows="1" placeholder="הערות…" aria-label="הערות"
-              hx-post="/listings/{{ l.id }}/notes" hx-trigger="change" hx-swap="none">{{ l.notes or '' }}</textarea>
+              hx-post="/listings/{{ l.id }}/notes" hx-trigger="change" hx-swap="none">{{ card.notes or '' }}</textarea>
   </div>
   {# Labelled, not only icons: a phone shows no tooltips. Pressing a lit button again undoes it #}
   <div class="card-footer bg-body listing-actions">
@@ -65,10 +65,10 @@
       ('contacted', '📞', 'פניתי', 'יצרתי קשר', 'success'),
       ('hidden', '🙈', 'הסתר', 'לא רלוונטי', 'secondary'),
     ] %}
-    <button class="btn btn-sm {% if l.status == status %}btn-{{ color }}{% else %}btn-outline-{{ color }}{% endif %}"
+    <button class="btn btn-sm {% if card.status == status %}btn-{{ color }}{% else %}btn-outline-{{ color }}{% endif %}"
             hx-post="/listings/{{ l.id }}/status" hx-vals='{"status": "{{ status }}"}' hx-disabled-elt="this"
             hx-target="#listing-{{ l.id }}" hx-swap="outerHTML" title="{{ title }}"
-            aria-pressed="{{ 'true' if l.status == status else 'false' }}"><span aria-hidden="true">{{ icon }}</span> {{ label }}</button>
+            aria-pressed="{{ 'true' if card.status == status else 'false' }}"><span aria-hidden="true">{{ icon }}</span> {{ label }}</button>
     {% endfor %}
   </div>
 </article>

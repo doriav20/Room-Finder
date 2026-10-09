@@ -4,6 +4,9 @@ Telegram bots are public, so access is enforced here. A Telegram user is allowed
 opening a one-time link that a signed-in dashboard user created for their own account. Every
 update is checked against the allowed Telegram user ids; anyone else is ignored without a
 reply. When a dashboard account is disabled, its Telegram chats are removed with it.
+
+Each chat acts for its account: it gets the listings that fit that user's search, and its
+buttons and commands change that user's marks and settings only.
 """
 
 import html
@@ -14,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from telegram import (
     CallbackQuery,
@@ -41,6 +44,7 @@ from roomfinder.db import utcnow
 from roomfinder.labels import area_note, furniture_label, parking_label
 from roomfinder.models import (
     Listing,
+    ListingMark,
     ListingStatus,
     Notification,
     SourceState,
@@ -48,7 +52,7 @@ from roomfinder.models import (
     User,
 )
 from roomfinder.schemas import PROPERTY_TYPE_LABELS, PropertyType
-from roomfinder.settings_store import get_preferences, save_preferences
+from roomfinder.settings_store import set_user_preferences, user_preferences
 
 log = logging.getLogger(__name__)
 
@@ -59,9 +63,9 @@ PAIRING_TTL = timedelta(minutes=10)
 HELP_TEXT = (
     "פקודות:\n"
     "/status - מצב המקורות\n"
-    "/latest - המודעות המתאימות האחרונות\n"
-    "/pause - השהיית התראות\n"
-    "/resume - חידוש התראות"
+    "/latest - המודעות האחרונות שמתאימות לחיפוש שלך\n"
+    "/pause - השהיית ההתראות שלך\n"
+    "/resume - חידוש ההתראות שלך"
 )
 
 
@@ -69,7 +73,7 @@ HELP_TEXT = (
 class PairingRequest:
     expires_at: datetime
     # The dashboard account the Telegram chat will belong to
-    account_id: int | None
+    account_id: int
 
 
 class PairingCodes:
@@ -79,7 +83,7 @@ class PairingCodes:
         self.ttl = ttl
         self._pending: dict[str, PairingRequest] = {}
 
-    def create(self, account_id: int | None = None) -> str:
+    def create(self, account_id: int) -> str:
         code = secrets.token_urlsafe(16)
         self._pending[code] = PairingRequest(utcnow() + self.ttl, account_id)
         return code
@@ -162,9 +166,10 @@ def more_photos(listing: Listing) -> list[str]:
     return listing.images[1 : 1 + ALBUM_LIMIT]
 
 
-def listing_keyboard(listing: Listing) -> InlineKeyboardMarkup:
-    favorite = listing.status == ListingStatus.FAVORITE
-    hidden = listing.status == ListingStatus.HIDDEN
+def listing_keyboard(listing: Listing, status: str) -> InlineKeyboardMarkup:
+    """The buttons under a listing, lit by the status the chat's user gave it."""
+    favorite = status == ListingStatus.FAVORITE
+    hidden = status == ListingStatus.HIDDEN
     top = [InlineKeyboardButton("🔗 למודעה", url=listing.url)]
     # An album can't carry buttons, so the rest of the photos come on request
     if photos := more_photos(listing):
@@ -235,32 +240,44 @@ class TelegramService:
             await self.application.stop()
         await self.application.shutdown()
 
-    def pairing_link(self, account_id: int | None = None) -> str:
+    def pairing_link(self, account_id: int) -> str:
         return f"https://t.me/{self.username}?start={self.pairing.create(account_id)}"
 
     # --- access ---------------------------------------------------------------
 
     @staticmethod
     def _allowed_chats():
-        # Chats of disabled accounts don't count (they're also deleted when disabling)
+        # Every chat acts for an account; chats of disabled accounts don't count (they're also
+        # deleted when disabling), nor chats paired before there were accounts
         return (
             select(TelegramChat)
-            .outerjoin(User, User.id == TelegramChat.account_id)
-            .where(or_(TelegramChat.account_id.is_(None), User.is_active.is_(True)))
+            .join(User, User.id == TelegramChat.account_id)
+            .where(User.is_active.is_(True))
         )
 
     async def allowed_chat_ids(self) -> list[int]:
         async with self.sessionmaker() as session:
             return [chat.chat_id for chat in await session.scalars(self._allowed_chats())]
 
-    async def is_allowed(self, user_id: int | None) -> bool:
-        if user_id is None:
-            return False
+    async def chat_ids_of(self, account_id: int) -> list[int]:
         async with self.sessionmaker() as session:
-            found = await session.scalar(
-                self._allowed_chats().where(TelegramChat.user_id == user_id)
+            chats = await session.scalars(
+                self._allowed_chats().where(TelegramChat.account_id == account_id)
             )
-            return found is not None
+            return [chat.chat_id for chat in chats]
+
+    async def account_of(self, user_id: int | None) -> int | None:
+        """The dashboard account an allowed Telegram user acts for, or None for anyone else."""
+        if user_id is None:
+            return None
+        async with self.sessionmaker() as session:
+            chat = await session.scalar(
+                self._allowed_chats().where(TelegramChat.user_id == user_id).limit(1)
+            )
+            return chat.account_id if chat else None
+
+    async def is_allowed(self, user_id: int | None) -> bool:
+        return await self.account_of(user_id) is not None
 
     async def pair(self, code: str, chat_id: int, user_id: int, name: str) -> bool:
         """Allow this user, if the one-time code is valid."""
@@ -284,18 +301,18 @@ class TelegramService:
 
     # --- Notifier ------------------------------------------------------------
 
-    async def new_listing(self, listing: Listing, *, silent: bool) -> None:
+    async def new_listing(self, user_id: int, listing: Listing, *, silent: bool) -> None:
         text = format_new_listing(listing, self._label(listing))
-        await self._send_listing(listing, text, "new", silent)
+        await self._send_listing(user_id, listing, text, "new", silent)
 
     async def price_drop(
-        self, listing: Listing, old_price: int, new_price: int, *, silent: bool
+        self, user_id: int, listing: Listing, old_price: int, new_price: int, *, silent: bool
     ) -> None:
         text = format_price_drop(listing, self._label(listing), old_price, new_price)
-        await self._send_listing(listing, text, "price_drop", silent)
+        await self._send_listing(user_id, listing, text, "price_drop", silent)
 
-    async def message(self, text: str, *, silent: bool = False) -> None:
-        await self.send_text(await self.allowed_chat_ids(), text, silent=silent)
+    async def message(self, user_id: int, text: str, *, silent: bool = False) -> None:
+        await self.send_text(await self.chat_ids_of(user_id), text, silent=silent)
 
     async def send_text(self, chat_ids: Iterable[int], text: str, *, silent: bool = False) -> None:
         for chat_id in chat_ids:
@@ -309,9 +326,17 @@ class TelegramService:
     def _label(self, listing: Listing) -> str:
         return self.source_labels.get(listing.source, listing.source)
 
-    async def _send_listing(self, listing: Listing, text: str, kind: str, silent: bool) -> None:
-        keyboard = listing_keyboard(listing)
-        for chat_id in await self.allowed_chat_ids():
+    async def _send_listing(
+        self, user_id: int, listing: Listing, text: str, kind: str, silent: bool
+    ) -> None:
+        async with self.sessionmaker() as session:
+            status = await session.scalar(
+                select(ListingMark.status).where(
+                    ListingMark.user_id == user_id, ListingMark.listing_id == listing.id
+                )
+            )
+        keyboard = listing_keyboard(listing, status or ListingStatus.SEEN)
+        for chat_id in await self.chat_ids_of(user_id):
             sent: Message | None = None
             if listing.images:
                 try:
@@ -353,23 +378,26 @@ class TelegramService:
             return
         if context.args and await self.pair(context.args[0], chat.id, user.id, user.full_name):
             await message.reply_text(
-                "✅ מחובר! מעכשיו יגיעו לכאן התראות על דירות חדשות.\n\n" + HELP_TEXT
+                "✅ מחובר! מעכשיו יגיעו לכאן התראות על דירות חדשות שמתאימות לחיפוש שלך.\n\n"
+                + HELP_TEXT
             )
         elif await self.is_allowed(user.id):
             await message.reply_text("הבוט פעיל ✅\n\n" + HELP_TEXT)
         # Anyone else gets no answer at all
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._allowed_message(update):
+        if await self._account(update) is not None:
             await update.message.reply_text(HELP_TEXT)
 
     async def _on_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._allowed_message(update):
+        account_id = await self._account(update)
+        if account_id is None:
             return
         timezone = ZoneInfo(self.settings.timezone)
         lines = []
         async with self.sessionmaker() as session:
-            paused = (await get_preferences(session)).notifications_paused
+            account = await session.get(User, account_id)
+            paused = user_preferences(account).notifications_paused
             states = {state.source: state for state in await session.scalars(select(SourceState))}
         for name, label in self.source_labels.items():
             state = states.get(name)
@@ -384,28 +412,31 @@ class TelegramService:
             if state.last_error:
                 lines.append(f"    {state.last_error[:120]}")
         if paused:
-            lines.append("\n🔕 ההתראות מושהות (/resume לחידוש)")
+            lines.append("\n🔕 ההתראות שלך מושהות (/resume לחידוש)")
         await update.message.reply_text("\n".join(lines))
 
     async def _on_latest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._allowed_message(update):
+        account_id = await self._account(update)
+        if account_id is None:
             return
         async with self.sessionmaker() as session:
             listings = list(
                 await session.scalars(
                     select(Listing)
+                    .join(ListingMark, ListingMark.listing_id == Listing.id)
                     .where(
-                        Listing.matches.is_(True),
+                        ListingMark.user_id == account_id,
+                        ListingMark.matches.is_(True),
+                        ListingMark.status != ListingStatus.HIDDEN,
                         Listing.removed_at.is_(None),
                         Listing.duplicate_of_id.is_(None),
-                        Listing.status != ListingStatus.HIDDEN,
                     )
                     .order_by(Listing.first_seen_at.desc())
                     .limit(5)
                 )
             )
         if not listings:
-            await update.message.reply_text("אין עדיין מודעות מתאימות.")
+            await update.message.reply_text("אין עדיין מודעות שמתאימות לחיפוש שלך.")
             return
         lines = []
         for listing in listings:
@@ -419,35 +450,41 @@ class TelegramService:
         )
 
     async def _on_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._allowed_message(update):
-            if await self._set_paused(True):
-                text = "🔕 ההתראות הושהו. הבדיקות ממשיכות ברקע (/resume)."
+        account_id = await self._account(update)
+        if account_id is not None:
+            if await self._set_paused(account_id, True):
+                text = "🔕 ההתראות שלך הושהו. הבדיקות ממשיכות ברקע (/resume)."
             else:
-                text = "🔕 ההתראות כבר מושהות (/resume כדי להחזיר אותן)."
+                text = "🔕 ההתראות שלך כבר מושהות (/resume כדי להחזיר אותן)."
             await update.message.reply_text(text)
 
     async def _on_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._allowed_message(update):
-            if await self._set_paused(False):
-                text = "🔔 ההתראות חזרו."
+        account_id = await self._account(update)
+        if account_id is not None:
+            if await self._set_paused(account_id, False):
+                text = "🔔 ההתראות שלך חזרו."
             else:
-                text = "🔔 ההתראות כבר מופעלות."
+                text = "🔔 ההתראות שלך כבר מופעלות."
             await update.message.reply_text(text)
 
-    async def _set_paused(self, paused: bool) -> bool:
-        """Pause or resume notifications; False when they were already that way."""
+    async def _set_paused(self, account_id: int, paused: bool) -> bool:
+        """Pause or resume one user's notifications; False when they were already that way."""
         async with self.sessionmaker() as session:
-            preferences = await get_preferences(session)
+            account = await session.get(User, account_id)
+            preferences = user_preferences(account)
             if preferences.notifications_paused == paused:
                 return False
             preferences.notifications_paused = paused
-            await save_preferences(session, preferences)
+            set_user_preferences(account, preferences)
             await session.commit()
         return True
 
     async def _on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if query is None or not await self.is_allowed(query.from_user.id):
+        if query is None:
+            return
+        account_id = await self.account_of(query.from_user.id)
+        if account_id is None:
             return
         action, _, listing_id = (query.data or "").partition(":")
         if action == "photos" and listing_id.isdigit():
@@ -462,15 +499,21 @@ class TelegramService:
             if listing is None:
                 await query.answer("המודעה לא נמצאה")
                 return
+            found = listing.marks.get(account_id)
+            if found is None:
+                found = listing.marks[account_id] = ListingMark(
+                    user_id=account_id, matches=False, status=ListingStatus.SEEN
+                )
             # Pressing the same button again undoes it
-            listing.status = ListingStatus.SEEN if listing.status == wanted else wanted
+            found.status = ListingStatus.SEEN if found.status == wanted else wanted
+            status = found.status
             await session.commit()
         answers = {
             ListingStatus.FAVORITE: "⭐ נשמר במועדפים",
             ListingStatus.HIDDEN: "🙈 סומן כלא רלוונטי",
         }
-        await query.answer(answers.get(ListingStatus(listing.status), "בוטל"))
-        await query.edit_message_reply_markup(listing_keyboard(listing))
+        await query.answer(answers.get(ListingStatus(status), "בוטל"))
+        await query.edit_message_reply_markup(listing_keyboard(listing, status))
 
     async def _send_more_photos(self, query: CallbackQuery, listing_id: int) -> None:
         """Send the rest of a listing's photos as a reply to its message."""
@@ -513,6 +556,9 @@ class TelegramService:
                 reply_parameters=reply,
             )
 
-    async def _allowed_message(self, update: Update) -> bool:
+    async def _account(self, update: Update) -> int | None:
+        """The account a command message acts for, if it comes from an allowed user."""
         user = update.effective_user
-        return update.message is not None and user is not None and await self.is_allowed(user.id)
+        if update.message is None or user is None:
+            return None
+        return await self.account_of(user.id)

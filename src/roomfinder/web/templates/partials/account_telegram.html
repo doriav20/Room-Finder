@@ -2,7 +2,7 @@
 <p class="mb-0">הבוט לא מוגדר (צריך <code>TELEGRAM_BOT_TOKEN</code> בקובץ <code>.env</code>).</p>
 {% else %}
 <p class="mb-2">הבוט: <a href="https://t.me/{{ telegram.username }}" target="_blank" rel="noopener" dir="ltr">@{{ telegram.username }}</a></p>
-<p class="small text-body-secondary">התראות על דירות חדשות מגיעות לכל מי שחיבר טלגרם לחשבון פעיל. הבוט לא עונה לאף אחד אחר.</p>
+<p class="small text-body-secondary">התראות על דירות חדשות שמתאימות <a href="/settings">לחיפוש שלך</a> מגיעות לטלגרם שחיברת לחשבון. הכפתורים והפקודות בבוט משנים רק את הסימונים וההגדרות שלך. הבוט לא עונה לאף אחד אחר.</p>
 
 {% if telegram.chats %}
 <ul class="list-group mb-3">

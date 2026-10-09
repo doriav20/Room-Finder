@@ -107,5 +107,13 @@ class SearchCriteria(BaseModel):
         """Fields that change which listings the sources return (the rest are local filters)."""
         return self.model_dump(
             mode="json",
-            include={"city", "rooms_min", "rooms_max", "price_min", "price_max", "property_types"},
+            include={
+                "city",
+                "rooms_min",
+                "rooms_max",
+                "price_min",
+                "price_max",
+                "property_types",
+                "private_only",
+            },
         )

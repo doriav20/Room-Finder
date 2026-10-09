@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import StatementError
 
-from roomfinder.models import Listing, ListingStatus
+from roomfinder.models import Listing
 
 
 async def test_listing_round_trip_returns_aware_utc_datetimes(session):
@@ -21,7 +21,6 @@ async def test_listing_round_trip_returns_aware_utc_datetimes(session):
     assert listing.posted_at == posted
     assert listing.posted_at.tzinfo == UTC
     assert listing.first_seen_at.tzinfo == UTC
-    assert listing.status == ListingStatus.NEW
     assert listing.images == []
 
 

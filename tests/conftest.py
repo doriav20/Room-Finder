@@ -3,7 +3,7 @@ import contextlib
 import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -15,7 +15,7 @@ from roomfinder import (
 from roomfinder.config import Settings
 from roomfinder.db import Base, create_sessionmaker, utcnow
 from roomfinder.main import create_app
-from roomfinder.models import Listing, ListingStatus, Role, User
+from roomfinder.models import Listing, ListingMark, ListingStatus, Role, User
 
 PASSWORD = "correct horse battery"
 
@@ -70,7 +70,16 @@ def db(database_path):
         yield session
 
 
-def add_listing(db: Session, source_id: str, **overrides) -> Listing:
+def add_listing(
+    db: Session,
+    source_id: str,
+    *,
+    status: str = ListingStatus.SEEN,
+    matches: bool = True,
+    notes: str | None = None,
+    **overrides,
+) -> Listing:
+    """A stored listing, with the same mark (status, match, notes) for every user so far."""
     now = utcnow()
     fields = {
         "source": "yad2",
@@ -86,8 +95,6 @@ def add_listing(db: Session, source_id: str, **overrides) -> Listing:
         "city": "ראשון לציון",
         "property_type": "apartment",
         "is_agency": False,
-        "status": ListingStatus.SEEN,
-        "matches": True,
         "images": [],
         "features": ["חניה"],
         "first_seen_at": now,
@@ -95,8 +102,22 @@ def add_listing(db: Session, source_id: str, **overrides) -> Listing:
     } | overrides
     listing = Listing(**fields)
     db.add(listing)
+    db.flush()
+    for user in db.scalars(select(User)):
+        db.add(
+            ListingMark(
+                user_id=user.id, listing_id=listing.id, matches=matches, status=status, notes=notes
+            )
+        )
     db.commit()
     return listing
+
+
+def mark_of(db: Session, listing: Listing, user: User | int = 1) -> ListingMark | None:
+    """A user's mark on a listing, as stored now."""
+    db.expire_all()
+    user_id = user if isinstance(user, int) else user.id
+    return db.get(ListingMark, (user_id, listing.id))
 
 
 def add_user(

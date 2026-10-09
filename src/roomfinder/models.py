@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, BigInteger, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, attribute_keyed_dict, mapped_column, relationship
 
 from roomfinder.db import Base, UTCDateTime, utcnow
 
@@ -63,9 +63,6 @@ class Listing(Base):
     first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    matches: Mapped[bool] = mapped_column(default=True)
-    status: Mapped[str] = mapped_column(String(16), default=ListingStatus.NEW, index=True)
-    notes: Mapped[str | None] = mapped_column(Text)
     # Normalized "street|house number", used to spot the same apartment on several sites
     address_key: Mapped[str | None] = mapped_column(String(160), index=True)
     duplicate_of_id: Mapped[int | None] = mapped_column(
@@ -78,6 +75,29 @@ class Listing(Base):
         cascade="all, delete-orphan",
         order_by="PriceChange.seen_at",
     )
+    # Each user's own view of the listing, by user id (loaded with the listing)
+    marks: Mapped[dict[int, "ListingMark"]] = relationship(
+        collection_class=attribute_keyed_dict("user_id"),
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+
+class ListingMark(Base):
+    """One user's view of a listing: whether it fits their search, their mark and notes."""
+
+    __tablename__ = "listing_marks"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    matches: Mapped[bool] = mapped_column(default=False)
+    status: Mapped[str] = mapped_column(String(16), default=ListingStatus.SEEN)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class PriceChange(Base):
@@ -115,8 +135,9 @@ class SourceState(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     interval_minutes: Mapped[int | None]
     custom_url: Mapped[str | None] = mapped_column(Text)
-    # Hash of everything that changes what the source returns; a change triggers a baseline run
-    fetch_signature: Mapped[str | None] = mapped_column(String(64))
+    # What the source was last read with (searchers.FetchScope); listings that only a
+    # different reading reaches are stored without notifications
+    fetch_scope: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     consecutive_failures: Mapped[int] = mapped_column(default=0)
     failure_alert_sent: Mapped[bool] = mapped_column(default=False)
     last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -174,6 +195,9 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The user's own search and notification settings (settings_store.py); empty is the defaults
+    criteria: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    preferences: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     @property
     def is_admin(self) -> bool:

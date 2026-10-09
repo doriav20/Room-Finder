@@ -6,7 +6,7 @@ from sqlalchemy import select
 from telegram.error import BadRequest
 
 from roomfinder.config import Settings
-from roomfinder.models import Listing, ListingStatus, Notification, TelegramChat, User
+from roomfinder.models import Listing, ListingMark, ListingStatus, Notification, TelegramChat, User
 from roomfinder.notify.telegram import (
     PairingCodes,
     TelegramService,
@@ -36,7 +36,6 @@ def make_listing(**overrides) -> Listing:
         "property_type": "apartment",
         "images": ["https://img.yad2.co.il/Pic/1.jpeg"],
         "features": ["חניה", 'ממ"ד'],
-        "status": ListingStatus.NEW,
     } | overrides
     return Listing(**fields)
 
@@ -83,9 +82,22 @@ def service(sessionmaker):
     return service
 
 
+async def add_account(session, username: str = "owner") -> User:
+    account = User(username=username, username_key=username, password_hash="x", role="member")
+    session.add(account)
+    await session.commit()
+    return account
+
+
 @pytest.fixture
-async def paired(service):
-    code = service.pairing.create()
+async def owner(session) -> User:
+    """The dashboard account that the paired Telegram chat acts for."""
+    return await add_account(session)
+
+
+@pytest.fixture
+async def paired(service, owner):
+    code = service.pairing.create(owner.id)
     assert await service.pair(code, chat_id=OWNER_ID, user_id=OWNER_ID, name="Owner")
     return service
 
@@ -107,7 +119,7 @@ def test_pairing_codes_are_single_use_and_expire():
     assert codes.consume(code) is None
 
     expired = PairingCodes(ttl=timedelta(seconds=-1))
-    assert expired.consume(expired.create()) is None
+    assert expired.consume(expired.create(7)) is None
     assert codes.consume("made-up") is None
 
 
@@ -182,8 +194,8 @@ def test_price_drop_message():
     assert text.splitlines()[:2] == ["📉 <b>ירידת מחיר ביד2</b>", "<s>6,500</s> ← <b>6,000 ₪</b>"]
 
 
-def test_keyboard_reflects_listing_status():
-    keyboard = listing_keyboard(make_listing(status=ListingStatus.FAVORITE)).inline_keyboard
+def test_keyboard_reflects_the_users_status():
+    keyboard = listing_keyboard(make_listing(), ListingStatus.FAVORITE).inline_keyboard
 
     assert keyboard[0][0].url == "https://www.yad2.co.il/realestate/item/abc"
     assert [button.text for button in keyboard[1]] == ["✅ במועדפים", "🙈 לא רלוונטי"]
@@ -194,16 +206,16 @@ def test_keyboard_reflects_listing_status():
 def test_keyboard_offers_the_rest_of_the_photos():
     photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(15)]
 
-    [link, more] = listing_keyboard(make_listing(images=photos)).inline_keyboard[0]
-    [_, one_more] = listing_keyboard(make_listing(images=photos[:2])).inline_keyboard[0]
+    [link, more] = listing_keyboard(make_listing(images=photos), "new").inline_keyboard[0]
+    [_, one_more] = listing_keyboard(make_listing(images=photos[:2]), "new").inline_keyboard[0]
 
     assert (more.text, more.callback_data) == ("📷 עוד 10 תמונות", "photos:7")
     assert one_more.text == "📷 עוד תמונה"
 
 
-async def test_each_link_allows_one_more_user_and_users_can_be_removed(service):
-    assert await service.pair(service.pairing.create(), 1, 1, "First")
-    assert await service.pair(service.pairing.create(), 2, 2, "Second")
+async def test_each_link_allows_one_more_user_and_users_can_be_removed(service, owner):
+    assert await service.pair(service.pairing.create(owner.id), 1, 1, "First")
+    assert await service.pair(service.pairing.create(owner.id), 2, 2, "Second")
     assert sorted(await service.allowed_chat_ids()) == [1, 2]
 
     await service.unpair(1)
@@ -213,9 +225,9 @@ async def test_each_link_allows_one_more_user_and_users_can_be_removed(service):
     assert not await service.pair("wrong-code", 3, 3, "Third")
 
 
-async def test_start_with_a_valid_code_pairs_the_chat(service):
+async def test_start_with_a_valid_code_pairs_the_chat(service, owner):
     update, reply = start_update(OWNER_ID)
-    context = SimpleNamespace(args=[service.pairing.create()])
+    context = SimpleNamespace(args=[service.pairing.create(owner.id)])
 
     await service._on_start(update, context)
 
@@ -231,11 +243,23 @@ async def test_pause_and_resume_say_when_nothing_changed(paired):
         replies.append(reply.calls[0][0][0])
 
     assert replies == [
-        "🔔 ההתראות כבר מופעלות.",
-        "🔕 ההתראות הושהו. הבדיקות ממשיכות ברקע (/resume).",
-        "🔕 ההתראות כבר מושהות (/resume כדי להחזיר אותן).",
-        "🔔 ההתראות חזרו.",
+        "🔔 ההתראות שלך כבר מופעלות.",
+        "🔕 ההתראות שלך הושהו. הבדיקות ממשיכות ברקע (/resume).",
+        "🔕 ההתראות שלך כבר מושהות (/resume כדי להחזיר אותן).",
+        "🔔 ההתראות שלך חזרו.",
     ]
+
+
+async def test_pausing_pauses_only_the_chats_own_account(paired, owner, session):
+    other = await add_account(session, "dan")
+    owner_id, other_id = owner.id, other.id
+
+    update, _ = start_update(OWNER_ID)
+    await paired._on_pause(update, SimpleNamespace(args=[]))
+
+    session.expire_all()
+    assert (await session.get(User, owner_id)).preferences["notifications_paused"] is True
+    assert (await session.get(User, other_id)).preferences is None
 
 
 async def test_strangers_get_no_answer(paired):
@@ -249,21 +273,21 @@ async def test_strangers_get_no_answer(paired):
     assert not await paired.is_allowed(STRANGER_ID)
 
 
-async def test_group_chats_cannot_pair(service):
+async def test_group_chats_cannot_pair(service, owner):
     update, reply = start_update(OWNER_ID, chat_type="group")
 
-    await service._on_start(update, SimpleNamespace(args=[service.pairing.create()]))
+    await service._on_start(update, SimpleNamespace(args=[service.pairing.create(owner.id)]))
 
     assert await service.allowed_chat_ids() == []
     assert reply.calls == []
 
 
-async def test_new_listing_is_sent_with_photo_and_recorded(paired, session):
+async def test_new_listing_is_sent_with_photo_and_recorded(paired, owner, session):
     listing = make_listing(id=None)
     session.add(listing)
     await session.commit()
 
-    await paired.new_listing(listing, silent=True)
+    await paired.new_listing(owner.id, listing, silent=True)
 
     [photo] = paired.bot.photos
     assert photo["chat_id"] == OWNER_ID
@@ -273,29 +297,55 @@ async def test_new_listing_is_sent_with_photo_and_recorded(paired, session):
     assert (notification.listing_id, notification.kind) == (listing.id, "new")
 
 
-async def test_photo_failure_falls_back_to_text(paired, session):
+async def test_listings_go_only_to_the_chats_of_the_user_they_are_for(paired, session):
+    other = await add_account(session, "dan")
+    assert await paired.pair(paired.pairing.create(other.id), 22, 22, "Dan")
+    listing = make_listing(id=None)
+    session.add(listing)
+    await session.commit()
+
+    await paired.new_listing(other.id, listing, silent=False)
+    await paired.message(other.id, "hello")
+
+    assert [photo["chat_id"] for photo in paired.bot.photos] == [22]
+    assert [message["chat_id"] for message in paired.bot.messages] == [22]
+
+
+async def test_photo_failure_falls_back_to_text(paired, owner, session):
     paired.bot = FakeBot(photo_error=BadRequest("Wrong file identifier/http url specified"))
     listing = make_listing(id=None)
     session.add(listing)
     await session.commit()
 
-    await paired.new_listing(listing, silent=False)
+    await paired.new_listing(owner.id, listing, silent=False)
 
     assert len(paired.bot.messages) == 1
     assert paired.bot.messages[0]["text"].startswith("🏠")
 
 
-async def test_nothing_is_sent_before_pairing(service):
-    await service.message("hello")
+async def test_nothing_is_sent_before_pairing(service, owner):
+    await service.message(owner.id, "hello")
 
     assert service.bot.messages == []
 
 
-async def test_buttons_toggle_status_for_allowed_users_only(paired, session):
-    listing = make_listing(id=None, status=ListingStatus.NEW)
-    session.add(listing)
+async def test_chats_without_an_account_are_no_longer_allowed(service, session):
+    session.add(TelegramChat(chat_id=5, user_id=5, name="Old"))
     await session.commit()
-    listing_id = listing.id
+
+    assert not await service.is_allowed(5)
+    assert await service.allowed_chat_ids() == []
+
+
+async def test_buttons_toggle_the_users_own_status_for_allowed_users_only(paired, owner, session):
+    other = await add_account(session, "dan")
+    listing = make_listing(id=None)
+    session.add(listing)
+    await session.flush()
+    session.add(ListingMark(user_id=owner.id, listing_id=listing.id, status=ListingStatus.NEW))
+    session.add(ListingMark(user_id=other.id, listing_id=listing.id, status=ListingStatus.NEW))
+    await session.commit()
+    listing_id, owner_id, other_id = listing.id, owner.id, other.id
 
     def press(user_id: int, data: str):
         answer, edit = Recorder(), Recorder()
@@ -307,9 +357,9 @@ async def test_buttons_toggle_status_for_allowed_users_only(paired, session):
         )
         return SimpleNamespace(callback_query=query), answer
 
-    async def status_now():
+    async def status_now(account_id: int = owner_id):
         session.expire_all()
-        return (await session.get(Listing, listing_id)).status
+        return (await session.get(ListingMark, (account_id, listing_id))).status
 
     update, answer = press(STRANGER_ID, f"fav:{listing_id}")
     await paired._on_button(update, None)
@@ -324,6 +374,7 @@ async def test_buttons_toggle_status_for_allowed_users_only(paired, session):
     update, _ = press(OWNER_ID, f"fav:{listing_id}")
     await paired._on_button(update, None)
     assert await status_now() == ListingStatus.SEEN
+    assert await status_now(other_id) == ListingStatus.NEW
 
 
 def photos_press(listing_id: int, user_id: int = OWNER_ID):

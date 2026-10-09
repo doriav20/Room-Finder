@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}הגדרות · RoomFinder{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">הגדרות</h1>
+<h1 class="h3 mb-1">הגדרות</h1>
+<p class="text-body-secondary small mb-3">החיפוש וההתראות כאן הם שלך בלבד. לכל משתמש יש הגדרות משלו.</p>
 
 {% if saved %}
 <div class="alert alert-success">✔ {{ saved }}</div>
@@ -10,7 +11,7 @@
 <div class="row g-4">
   <div class="col-lg-7">
     <form class="card shadow-sm" method="post" action="/settings/criteria">
-      <div class="card-header bg-body fw-semibold">🔎 מה מחפשים</div>
+      <div class="card-header bg-body fw-semibold">🔎 החיפוש שלי</div>
       <div class="card-body">
         <div class="row g-3">
           <div class="col-md-4">
@@ -93,7 +94,7 @@
       </div>
       <div class="card-footer bg-body d-flex align-items-center gap-3">
         <button class="btn btn-primary">שמור</button>
-        <small class="text-body-secondary">שינוי בעיר, בחדרים, במחיר או בסוג הנכס מתחיל ריצת בסיס שקטה, כדי שלא תקבל הצפה של מודעות ישנות.</small>
+        <small class="text-body-secondary">האתרים נבדקים פעם אחת בשביל כולם, בחיפוש שמכסה את החיפושים של כל המשתמשים. כשהחיפוש שלך מרחיב אותו, מודעות שכבר מפורסמות בטווח החדש נשמרות בשקט ומגיעה הודעת סיכום אחת, כדי שלא תקבל הצפה של מודעות ישנות.</small>
       </div>
     </form>
   </div>
@@ -102,13 +103,13 @@
     <section class="card shadow-sm">
       <div class="card-header bg-body fw-semibold">✈️ טלגרם</div>
       <div class="card-body">
-        <p class="mb-2">כל משתמש מחבר את הטלגרם שלו מדף <a href="/account#telegram">החשבון שלי</a>, וההתראות מגיעות לכל מי שמחובר.</p>
+        <p class="mb-2">כל משתמש מחבר את הטלגרם שלו מדף <a href="/account#telegram">החשבון שלי</a>, ומקבל התראות רק על מודעות שמתאימות לחיפוש שלו.</p>
         {% if current_user.is_admin %}<p class="mb-0 small text-body-secondary">את החיבורים של כולם אפשר לראות בדף <a href="/users">משתמשים</a>.</p>{% endif %}
       </div>
     </section>
 
     <form class="card shadow-sm" method="post" action="/settings/preferences">
-      <div class="card-header bg-body fw-semibold">🔔 התראות ותזמון</div>
+      <div class="card-header bg-body fw-semibold">🔔 ההתראות שלי</div>
       <div class="card-body">
         <div class="form-check form-switch mb-2">
           <input class="form-check-input" type="checkbox" role="switch" name="notifications_paused" value="1" id="paused"
@@ -120,24 +121,34 @@
                  {% if preferences.notify_price_drops %}checked{% endif %}>
           <label class="form-check-label" for="drops">התראה על ירידת מחיר</label>
         </div>
-        <div class="row g-2 mb-3">
+        <div class="row g-2">
           <div class="col-12 small text-body-secondary">שעות שקטות - ההודעות מגיעות בלי צליל</div>
           <div class="col-6"><input type="time" name="quiet_hours_start" class="form-control" value="{{ preferences.quiet_hours_start.strftime('%H:%M') }}" aria-label="התחלה"></div>
           <div class="col-6"><input type="time" name="quiet_hours_end" class="form-control" value="{{ preferences.quiet_hours_end.strftime('%H:%M') }}" aria-label="סוף"></div>
-        </div>
-        <div class="row g-2">
-          <div class="col-12 small text-body-secondary">שעות לילה - בדיקות בתדירות נמוכה יותר</div>
-          <div class="col-6"><input type="time" name="night_start" class="form-control" value="{{ preferences.night_start.strftime('%H:%M') }}" aria-label="התחלה"></div>
-          <div class="col-6"><input type="time" name="night_end" class="form-control" value="{{ preferences.night_end.strftime('%H:%M') }}" aria-label="סוף"></div>
         </div>
       </div>
       <div class="card-footer bg-body"><button class="btn btn-primary">שמור</button></div>
     </form>
 
+    {% if current_user.is_admin %}
+    <form class="card shadow-sm" method="post" action="/settings/schedule">
+      <div class="card-header bg-body fw-semibold">🌙 שעות לילה <span class="fw-normal small text-body-secondary">(לכל המשתמשים, למנהלים)</span></div>
+      <div class="card-body">
+        <div class="row g-2">
+          <div class="col-12 small text-body-secondary">בשעות האלה האתרים נבדקים בתדירות נמוכה יותר</div>
+          <div class="col-6"><input type="time" name="night_start" class="form-control" value="{{ schedule.night_start.strftime('%H:%M') }}" aria-label="התחלה"></div>
+          <div class="col-6"><input type="time" name="night_end" class="form-control" value="{{ schedule.night_end.strftime('%H:%M') }}" aria-label="סוף"></div>
+        </div>
+      </div>
+      <div class="card-footer bg-body"><button class="btn btn-primary">שמור</button></div>
+    </form>
+    {% endif %}
+
     <div class="card shadow-sm">
       <div class="card-header bg-body fw-semibold">📤 ייצוא</div>
       <div class="card-body">
         <a class="btn btn-outline-secondary btn-sm" href="/export.csv">הורד את כל המודעות (CSV לאקסל)</a>
+        <div class="small text-body-secondary mt-2">עם הסימונים וההערות שלך, ואם כל מודעה מתאימה לחיפוש שלך.</div>
       </div>
     </div>
   </div>

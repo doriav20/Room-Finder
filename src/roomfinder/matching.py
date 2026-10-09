@@ -64,7 +64,9 @@ def mismatch_reasons(listing: ListingLike, criteria: SearchCriteria) -> list[str
 
     # Neighborhoods only mean something for the city whose map they come from
     if criteria.areas and areas.city_map(criteria.city) is not None:
-        area = areas.locate(listing)
+        # A stored listing keeps its neighborhood (pipeline.py), which saves placing it again
+        # for every user's search
+        area = listing.area if hasattr(listing, "area") else areas.locate(listing)
         if (area is None and not criteria.unknown_area_ok) or (
             area is not None and area not in criteria.areas
         ):

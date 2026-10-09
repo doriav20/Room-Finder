@@ -12,7 +12,7 @@ from roomfinder.browser import BrowserManager
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.runner import SourceRunner, get_source_state
-from roomfinder.settings_store import get_preferences
+from roomfinder.settings_store import get_schedule
 from roomfinder.sources.base import Source
 from roomfinder.timeutils import in_daily_window, local_time
 
@@ -115,13 +115,13 @@ class Scheduler:
         source = self.sources[name]
         async with self.sessionmaker() as session:
             state = await get_source_state(session, name)
-            preferences = await get_preferences(session)
+            schedule = await get_schedule(session)
         now = local_time(utcnow(), self.settings.timezone)
         return next_delay_seconds(
             state.interval_minutes or source.default_interval_minutes,
             source.night_interval_minutes,
             state.consecutive_failures,
-            in_daily_window(now, preferences.night_start, preferences.night_end),
+            in_daily_window(now, schedule.night_start, schedule.night_end),
             self._rng,
         )
 

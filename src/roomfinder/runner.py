@@ -1,11 +1,9 @@
 """Runs one check of one source: fetch, store, notify, and keep track of failures."""
 
 import asyncio
-import hashlib
-import json
 import logging
 from collections import defaultdict
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -15,11 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
-from roomfinder.models import Listing, ListingStatus, RunStatus, SourceRun, SourceState
+from roomfinder.models import (
+    Listing,
+    ListingMark,
+    ListingStatus,
+    Role,
+    RunStatus,
+    SourceRun,
+    SourceState,
+    User,
+)
 from roomfinder.notify import Notifier
-from roomfinder.pipeline import IngestOutcome, apply_details, ingest, mark_removed
-from roomfinder.schemas import SearchCriteria
-from roomfinder.settings_store import Preferences, get_criteria, get_preferences
+from roomfinder.pipeline import IngestOutcome, apply_details, ingest, interested, mark_removed
+from roomfinder.schemas import ListingData, SearchCriteria
+from roomfinder.searchers import FetchScope, Searcher, combined_searches, load_searchers
 from roomfinder.sources.base import BlockedError, FetchResult, Source, human_pause
 from roomfinder.timeutils import in_daily_window, local_time
 
@@ -39,10 +46,8 @@ class BrowserSessions(Protocol):
 @dataclass
 class _Stored:
     outcome: IngestOutcome
-    preferences: Preferences
     baseline: bool
     recovered: bool
-    matching: int
 
 
 @dataclass
@@ -55,13 +60,16 @@ class RunReport:
     error: str | None = None
 
 
-def fetch_signature(criteria: SearchCriteria, custom_url: str | None) -> str:
-    payload = json.dumps(
-        {"criteria": criteria.fetch_fields(), "custom_url": custom_url or None},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+def fetch_plan(searchers: Sequence[Searcher], custom_url: str | None) -> list[SearchCriteria]:
+    """The searches to read a source with: the active users' searches combined, one per city.
+
+    A custom URL replaces them and is read once. The source still gets a search with it,
+    which some use for the parameters of the site's own API.
+    """
+    searches = combined_searches(searcher.criteria for searcher in searchers if searcher.active)
+    if custom_url:
+        return searches[:1] or [SearchCriteria()]
+    return searches
 
 
 async def get_source_state(session: AsyncSession, name: str) -> SourceState:
@@ -72,13 +80,16 @@ async def get_source_state(session: AsyncSession, name: str) -> SourceState:
     return state
 
 
-async def _count_listings(session: AsyncSession, name: str, *, matching: bool = False) -> int:
+async def _count_listings(session: AsyncSession, name: str) -> int:
     query = select(func.count(Listing.id)).where(
         Listing.source == name, Listing.removed_at.is_(None)
     )
-    if matching:
-        query = query.where(Listing.matches.is_(True), Listing.duplicate_of_id.is_(None))
     return await session.scalar(query) or 0
+
+
+async def _admin_ids(session: AsyncSession) -> list[int]:
+    query = select(User.id).where(User.role == Role.ADMIN, User.is_active.is_(True))
+    return list(await session.scalars(query))
 
 
 class SourceRunner:
@@ -123,21 +134,27 @@ class SourceRunner:
     async def _run(self, source: Source) -> RunReport:
         async with self.sessionmaker() as session:
             state = await get_source_state(session, source.name)
-            criteria = await get_criteria(session)
+            searchers = await load_searchers(session)
             custom_url = state.custom_url
+            plan = fetch_plan(searchers, custom_url)
+            if not plan:
+                await session.commit()
+                log.info("%s: nobody is searching yet", source.name)
+                return RunReport(source.name, RunStatus.OK)
             run = SourceRun(source=source.name, started_at=utcnow(), status=RunStatus.RUNNING)
             session.add(run)
             await session.commit()
             run_id = run.id
+        scope = FetchScope.of(plan, custom_url)
 
         try:
             async with self.browser.session() as page:
-                result = await source.fetch(page, criteria, custom_url)
-                stored = await self._store(source, run_id, criteria, custom_url, result)
+                result = await self._fetch(source, page, plan, custom_url)
+                stored = await self._store(source, run_id, searchers, scope, result)
                 if isinstance(stored, RunReport):
                     return stored
                 if source.has_details:
-                    await self._add_details(source, page, run_id, stored.outcome, criteria)
+                    await self._add_details(source, page, run_id, stored.outcome, searchers)
         except BlockedError as exc:
             return await self._fail(source, run_id, RunStatus.BLOCKED, str(exc) or "bot check")
         except Exception as exc:
@@ -147,22 +164,35 @@ class SourceRunner:
         outcome = stored.outcome
         log.info(
             "%s: found %d, new %d, price drops %d, removed %d%s",
-            source.name, outcome.found, len(outcome.to_notify), len(outcome.price_drops),
-            outcome.removed, " (baseline)" if stored.baseline else "",
+            source.name, outcome.found, len(outcome.new), len(outcome.price_drops),
+            outcome.removed, " (the search changed)" if stored.baseline else "",
         )  # fmt: skip
-        await self._notify(
-            source, outcome, stored.preferences, stored.baseline, stored.recovered, stored.matching
-        )
+        await self._notify(source, outcome, searchers, stored.recovered)
         return RunReport(
-            source.name, RunStatus.OK, outcome.found, len(outcome.to_notify), stored.baseline
+            source.name, RunStatus.OK, outcome.found, len(outcome.new), stored.baseline
         )
+
+    @staticmethod
+    async def _fetch(
+        source: Source, page: Any, plan: list[SearchCriteria], custom_url: str | None
+    ) -> FetchResult:
+        """Read the source once for each search in the plan (one per city that users search)."""
+        listings: list[ListingData] = []
+        complete = True
+        for index, search in enumerate(plan):
+            if index:
+                await human_pause(5.0, 15.0)
+            result = await source.fetch(page, search, custom_url)
+            listings += result.listings
+            complete = complete and result.complete
+        return FetchResult(listings, complete)
 
     async def _store(
         self,
         source: Source,
         run_id: int,
-        criteria: SearchCriteria,
-        custom_url: str | None,
+        searchers: list[Searcher],
+        scope: FetchScope,
         result: FetchResult,
     ) -> "_Stored | RunReport":
         now = utcnow()
@@ -175,32 +205,36 @@ class SourceRunner:
                     source, run_id, RunStatus.ERROR, "No listings found - the site may have changed"
                 )
 
-            signature = fetch_signature(criteria, custom_url)
-            baseline = state.fetch_signature != signature
+            previous = FetchScope.model_validate(state.fetch_scope) if state.fetch_scope else None
             outcome = await ingest(
-                session, source.name, result.listings, criteria, baseline=baseline, now=now
+                session,
+                source.name,
+                result.listings,
+                searchers,
+                previous=previous,
+                current=scope,
+                now=now,
             )
             if result.complete:
                 outcome.removed = await mark_removed(session, source.name, now)
 
             recovered = state.failure_alert_sent
-            state.fetch_signature = signature
+            state.fetch_scope = scope.model_dump(mode="json")
             state.consecutive_failures = 0
             state.failure_alert_sent = False
             state.last_run_at = state.last_success_at = now
             state.last_error = None
 
+            # The source was read differently: what only the new reading reaches was stored quietly
+            baseline = previous != scope
             run = await session.get(SourceRun, run_id)
             run.status = RunStatus.OK
             run.finished_at = now
             run.found = outcome.found
-            run.new = len(outcome.to_notify)
+            run.new = len(outcome.new)
             run.baseline = baseline
-
-            preferences = await get_preferences(session)
-            matching = await _count_listings(session, source.name, matching=True)
             await session.commit()
-        return _Stored(outcome, preferences, baseline, recovered, matching)
+        return _Stored(outcome, baseline, recovered)
 
     async def _add_details(
         self,
@@ -208,15 +242,25 @@ class SourceRunner:
         page: Any,
         run_id: int,
         outcome: IngestOutcome,
-        criteria: SearchCriteria,
+        searchers: list[Searcher],
     ) -> None:
         """Read the pages of new listings (and a few older ones) for furniture, parking and text.
 
         A new listing's page can rule it out (e.g. unfurnished when furniture is required), so
         this happens before notifying.
         """
-        new_ids = [listing.id for listing in outcome.to_notify]
+        new_ids = [listing.id for listing in outcome.new]
         async with self.sessionmaker() as session:
+            # Older listings that someone wants: they fit an active user's search, who kept them
+            wanted = (
+                select(ListingMark.listing_id)
+                .join(User, User.id == ListingMark.user_id)
+                .where(
+                    ListingMark.matches.is_(True),
+                    ListingMark.status != ListingStatus.HIDDEN,
+                    User.is_active.is_(True),
+                )
+            )
             backfill = (
                 select(Listing.id)
                 .where(
@@ -224,8 +268,7 @@ class SourceRunner:
                     Listing.details_checked_at.is_(None),
                     Listing.removed_at.is_(None),
                     Listing.duplicate_of_id.is_(None),
-                    Listing.matches.is_(True),
-                    Listing.status != ListingStatus.HIDDEN,
+                    Listing.id.in_(wanted),
                     Listing.id.not_in(new_ids),
                 )
                 .order_by(Listing.first_seen_at.desc())
@@ -246,57 +289,64 @@ class SourceRunner:
                 except Exception:
                     log.exception("%s: reading listing %s failed", source.name, listing.url)
                     continue
-                apply_details(listing, details, criteria, utcnow())
+                apply_details(listing, details, searchers, utcnow())
                 await session.commit()
 
         if not new_ids:
             return
         async with self.sessionmaker() as session:
-            still_matching = []
+            still_new = []
             for listing_id in new_ids:
                 listing = await session.get(Listing, listing_id)
-                if listing.matches:
-                    still_matching.append(listing)
-                else:
-                    listing.status = ListingStatus.SEEN
+                for found in listing.marks.values():
+                    if found.status == ListingStatus.NEW and not found.matches:
+                        found.status = ListingStatus.SEEN
+                if any(found.status == ListingStatus.NEW for found in listing.marks.values()):
+                    still_new.append(listing)
             run = await session.get(SourceRun, run_id)
-            run.new = len(still_matching)
+            run.new = len(still_new)
             await session.commit()
-        outcome.to_notify = still_matching
+        outcome.new = still_new
 
     async def _notify(
         self,
         source: Source,
         outcome: IngestOutcome,
-        preferences: Preferences,
-        baseline: bool,
+        searchers: list[Searcher],
         recovered: bool,
-        matching: int,
     ) -> None:
-        silent = in_daily_window(
-            local_time(utcnow(), self.settings.timezone),
-            preferences.quiet_hours_start,
-            preferences.quiet_hours_end,
-        )
-        if recovered:
-            await self._safely(self.notifier.message(f"✅ {source.label} חזר לעבוד", silent=silent))
-        if preferences.notifications_paused:
-            return
-        if baseline:
-            text = (
-                f"🔎 {source.label}: נמצאו {matching} מודעות מתאימות שכבר מפורסמות "
-                f"(אפשר לראות אותן בדשבורד).\nמעכשיו תגיע התראה רק על מודעות חדשות."
+        """Tell each user what fits their own search, quietly in their own quiet hours."""
+        now = local_time(utcnow(), self.settings.timezone)
+        for searcher in searchers:
+            if not searcher.active:
+                continue
+            user, preferences = searcher.user_id, searcher.preferences
+            silent = in_daily_window(
+                now, preferences.quiet_hours_start, preferences.quiet_hours_end
             )
-            await self._safely(self.notifier.message(text, silent=silent))
-        for listing in outcome.to_notify:
-            await self._safely(self.notifier.new_listing(listing, silent=silent))
-        if preferences.notify_price_drops:
-            for drop in outcome.price_drops:
-                await self._safely(
-                    self.notifier.price_drop(
-                        drop.listing, drop.old_price, drop.new_price, silent=silent
-                    )
+            if recovered and searcher.is_admin:
+                text = f"✅ {source.label} חזר לעבוד"
+                await self._safely(self.notifier.message(user, text, silent=silent))
+            if preferences.notifications_paused:
+                continue
+            if count := outcome.already_listed[user]:
+                text = (
+                    f"🔎 {source.label}: נמצאו {count} מודעות מתאימות שכבר מפורסמות "
+                    f"(אפשר לראות אותן בדשבורד).\nמעכשיו תגיע התראה רק על מודעות חדשות."
                 )
+                await self._safely(self.notifier.message(user, text, silent=silent))
+            for listing in outcome.new:
+                found = listing.marks.get(user)
+                if found is not None and found.status == ListingStatus.NEW:
+                    await self._safely(self.notifier.new_listing(user, listing, silent=silent))
+            if not preferences.notify_price_drops:
+                continue
+            for drop in outcome.price_drops:
+                if user in interested(drop.listing):
+                    notification = self.notifier.price_drop(
+                        user, drop.listing, drop.old_price, drop.new_price, silent=silent
+                    )
+                    await self._safely(notification)
 
     async def _fail(self, source: Source, run_id: int, status: RunStatus, error: str) -> RunReport:
         now = utcnow()
@@ -316,17 +366,20 @@ class SourceRunner:
             run.status = status
             run.finished_at = now
             run.error = error
+            admins = await _admin_ids(session)
             await session.commit()
 
         log.warning("%s: %s (%s), failure #%d", source.name, status, error, failures)
         if send_alert:
+            # Only admins control the sources and the system's browser
             reason = "חסימת בוט / קפצ'ה" if status == RunStatus.BLOCKED else "שגיאה"
             text = (
                 f"⚠️ {source.label} נכשל {failures} פעמים ברצף ({reason}).\n{error}\n"
                 f"אפשר לראות מה הדפדפן של המערכת מציג ולפתור קפצ'ה ידנית כאן:\n"
                 f"{self.settings.novnc_url}"
             )
-            await self._safely(self.notifier.message(text))
+            for admin in admins:
+                await self._safely(self.notifier.message(admin, text))
         return RunReport(source.name, status, error=error)
 
     @staticmethod

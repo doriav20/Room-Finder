@@ -8,9 +8,9 @@ import pytest
 from sqlalchemy import delete
 from starlette.websockets import WebSocketDisconnect
 
-from conftest import PASSWORD, add_listing, add_user, sign_in
+from conftest import PASSWORD, add_listing, add_user, mark_of, sign_in
 from roomfinder.auth import SESSION_COOKIE
-from roomfinder.models import Listing, ListingStatus, Role, User, UserSession
+from roomfinder.models import ListingStatus, Role, User, UserSession
 from roomfinder.web import novnc
 
 PAGES = [
@@ -37,6 +37,7 @@ ACTIONS = [
     "/sources/yad2/settings",
     "/settings/criteria",
     "/settings/preferences",
+    "/settings/schedule",
     "/browser/restart",
     "/account/password",
     "/account/telegram/link",
@@ -74,15 +75,14 @@ def test_pages_redirect_to_sign_in_and_reveal_nothing(anonymous, db, path):
 
 
 @pytest.mark.parametrize("path", ACTIONS)
-def test_actions_do_nothing_when_signed_out(anonymous, db, path):
+def test_actions_do_nothing_when_signed_out(anonymous, db, admin, path):
     listing = add_listing(db, "a", status=ListingStatus.NEW)
 
     response = anonymous.post(path, data={"status": "hidden"}, follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/login")
-    db.expire_all()
-    assert db.get(Listing, listing.id).status == ListingStatus.NEW
+    assert mark_of(db, listing, admin).status == ListingStatus.NEW
 
 
 def test_htmx_and_api_requests_get_401_without_data(anonymous, db):
@@ -253,6 +253,7 @@ def test_disabled_users_cannot_sign_in(anonymous, db):
 
 
 def test_invite_link_creates_one_account(client, db):
+    add_listing(db, "a")
     link = invite_link(client, note="נועה")
     client.post("/logout")
 
@@ -260,6 +261,8 @@ def test_invite_link_creates_one_account(client, db):
     response = register(client, link, "noa")
     assert response.status_code == 303
     assert "noa" in client.get("/").text  # signed in right away
+    # with the default search, judged against every listing already stored
+    assert "6,000 ₪" in client.get("/?tab=all").text
     client.post("/logout")
     assert register(client, link, "someone-else").status_code == 404
     assert db.query(User).filter_by(username_key="noa").one().role == Role.MEMBER
@@ -284,6 +287,8 @@ def test_members_cannot_reach_admin_pages(anonymous, db):
     assert anonymous.post("/users/invites", data={"role": "admin"}).status_code == 403
     assert anonymous.get("/novnc/vnc.html").status_code == 403
     assert anonymous.post("/browser/restart").status_code == 403
+    assert anonymous.post("/sources/yad2/run").status_code == 403
+    assert anonymous.post("/settings/schedule").status_code == 403
     page = anonymous.get("/sources").text
     assert "/users" not in page and "/novnc" not in page
     assert anonymous.get("/").status_code == 200  # the rest of the dashboard works

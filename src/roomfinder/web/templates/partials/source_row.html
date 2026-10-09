@@ -6,7 +6,7 @@
     {% if row.search_url %}
     <div class="small text-nowrap">
       <a href="{{ row.search_url }}" target="_blank" rel="noopener noreferrer"
-         title="{% if row.state.custom_url %}הכתובת המותאמת{% else %}החיפוש באתר עם הסינונים מההגדרות{% endif %}">החיפוש באתר ↗</a>
+         title="{% if row.state.custom_url %}הכתובת המותאמת{% else %}החיפוש שלך באתר, עם הסינונים מההגדרות שלך{% endif %}">החיפוש באתר ↗</a>
       <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-link="{{ row.search_url }}"
               title="העתק את הקישור" onclick="navigator.clipboard.writeText(this.dataset.link).then(() => this.textContent = '✔ הועתק')">העתק</button>
     </div>
@@ -28,32 +28,39 @@
     {% endif %}
     {% else %}—{% endif %}
   </td>
-  <td class="small" data-label="תוצאות">{{ row.active }} פעילות<br><span class="text-body-secondary">{{ row.matching }} מתאימות</span></td>
+  <td class="small" data-label="תוצאות">{{ row.active }} פעילות<br><span class="text-body-secondary">{{ row.matching }} מתאימות לך</span></td>
   <td style="max-width: 9rem" data-label="כל כמה דקות">
+    {% if current_user.is_admin %}
     <form hx-post="/sources/{{ row.name }}/settings" hx-target="#source-{{ row.name }}" hx-swap="outerHTML" hx-trigger="change">
       <input type="number" name="interval_minutes" min="5" max="240" class="form-control form-control-sm"
              value="{{ row.state.interval_minutes or '' }}" placeholder="{{ row.default_interval }}">
       <input type="hidden" name="custom_url" value="{{ row.state.custom_url or '' }}">
     </form>
+    {% else %}{{ row.state.interval_minutes or row.default_interval }}{% endif %}
   </td>
+  {# The sources are shared by everyone, so only admins check, pause or change them #}
+  {% if current_user.is_admin %}
   <td class="text-nowrap">
     <button class="btn btn-sm btn-primary" hx-post="/sources/{{ row.name }}/run"
             hx-target="#source-{{ row.name }}" hx-swap="outerHTML"{% if row.running %} disabled{% endif %}>בדוק עכשיו</button>
     <button class="btn btn-sm btn-outline-secondary" hx-post="/sources/{{ row.name }}/toggle"
             hx-target="#source-{{ row.name }}" hx-swap="outerHTML">{% if row.state.enabled %}כבה{% else %}הפעל{% endif %}</button>
   </td>
+  {% else %}<td class="stack-empty"></td>{% endif %}
 </tr>
+{% if current_user.is_admin %}
 <tr class="small stack-joined">
   <td colspan="6" class="pt-0 border-top-0">
     <details{% if row.state.custom_url %} open{% endif %}>
-      <summary class="text-body-secondary">כתובת חיפוש מותאמת (לא חובה)</summary>
+      <summary class="text-body-secondary">כתובת חיפוש מותאמת (לא חובה, ובמקום החיפוש המשולב של כל המשתמשים)</summary>
       <form class="d-flex gap-2 mt-2" hx-post="/sources/{{ row.name }}/settings" hx-target="#source-{{ row.name }}" hx-swap="outerHTML">
         <input type="hidden" name="interval_minutes" value="{{ row.state.interval_minutes or '' }}">
         <input type="url" name="custom_url" class="form-control form-control-sm" dir="ltr"
-               value="{{ row.state.custom_url or '' }}" placeholder="הדבק כאן חיפוש מהאתר, או השאר ריק כדי להשתמש בהגדרות">
+               value="{{ row.state.custom_url or '' }}" placeholder="הדבק כאן חיפוש מהאתר, או השאר ריק כדי לחפש לפי ההגדרות של המשתמשים">
         <button class="btn btn-sm btn-outline-primary">שמור</button>
       </form>
     </details>
   </td>
 </tr>
+{% endif %}
 </tbody>

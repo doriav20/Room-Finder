@@ -2,11 +2,12 @@ import json
 import re
 from datetime import timedelta
 
+import pytest
 from markupsafe import escape
 
-from conftest import add_listing
+from conftest import PASSWORD, add_listing, add_user, mark_of, sign_in
 from roomfinder.db import utcnow
-from roomfinder.models import Listing, ListingStatus, PriceChange, Setting
+from roomfinder.models import ListingStatus, PriceChange, Role, Setting, User
 from roomfinder.schemas import SearchCriteria
 from roomfinder.sources import build_sources
 
@@ -61,7 +62,7 @@ def test_notes_are_saved(client, db):
 
     assert response.status_code == 204
     db.expire_all()
-    assert db.get(Listing, listing.id).notes == "להתקשר בערב"
+    assert mark_of(db, listing).notes == "להתקשר בערב"
 
 
 def test_mark_all_new_as_seen(client, db):
@@ -70,8 +71,7 @@ def test_mark_all_new_as_seen(client, db):
     response = client.post("/listings/mark-seen", follow_redirects=False)
 
     assert response.status_code == 303
-    db.expire_all()
-    assert db.get(Listing, listing.id).status == ListingStatus.SEEN
+    assert mark_of(db, listing).status == ListingStatus.SEEN
 
 
 def test_updates_api_reports_new_matching_listings(client, db):
@@ -185,7 +185,8 @@ def test_furniture_and_parking_criteria_are_saved(client, db):
     )  # fmt: skip
 
     assert response.status_code == 303
-    saved = db.get(Setting, "criteria").value
+    db.expire_all()
+    saved = db.get(User, 1).criteria
     assert (saved["furnished"], saved["parking_required"]) == ("yes", True)
     assert '<option value="yes" selected>מרוהטת בלבד</option>' in client.get("/settings").text
     bad = client.post("/settings/criteria", data={"rooms_min": "4", "furnished": "maybe"})
@@ -238,10 +239,9 @@ def test_saving_criteria_recomputes_matches(client, db):
     )
 
     assert response.status_code == 303
-    db.expire_all()
-    assert db.get(Listing, listing.id).matches is True
+    assert mark_of(db, listing).matches is True
     page = client.get("/settings?saved=criteria").text
-    assert "החיפוש נשמר" in page
+    assert "החיפוש שלך נשמר" in page
     assert 'value="7000"' in page
 
 
@@ -335,10 +335,9 @@ def test_choosing_neighborhoods_saves_them_and_judges_listings_again(client, db)
     )
 
     assert response.status_code == 303
-    db.expire_all()
-    assert db.get(Listing, inside.id).matches is True
-    assert db.get(Listing, outside.id).matches is False
-    saved = db.get(Setting, "criteria").value
+    assert mark_of(db, inside).matches is True
+    assert mark_of(db, outside).matches is False
+    saved = db.get(User, 1).criteria
     assert (saved["areas"], saved["unknown_area_ok"]) == (["רמז"], True)
     assert "השכונות נשמרו" in client.get("/areas?saved=1").text
     assert "📍 שכונת רמז" in client.get("/settings").text
@@ -350,12 +349,11 @@ def test_saving_the_search_keeps_the_neighborhoods_of_the_same_city(client, db):
     search = {"city": "ראשון לציון", "rooms_min": "4", "rooms_max": "4"}
 
     client.post("/settings/criteria", data=search)
-    assert db.get(Setting, "criteria").value["areas"] == ["נווה ים", "רמז"]
-
-    client.post("/settings/criteria", data=search | {"city": "חולון"})
     db.expire_all()
-    assert db.get(Setting, "criteria").value["areas"] == []
-    assert "אין עדיין מפת שכונות" in client.get("/areas").text
+    assert db.get(User, 1).criteria["areas"] == ["נווה ים", "רמז"]
+
+    # Only cities every site can be searched in
+    assert client.post("/settings/criteria", data=search | {"city": "חולון"}).status_code == 400
 
 
 def test_listings_filter_by_official_neighborhood(client, db):
@@ -422,3 +420,127 @@ def test_cards_show_every_photo(client, db):
     assert all(f'src="{photo}"' in page for photo in photos)
     assert page.count("gallery-next") == 1  # only the card with several photos
     assert "<span data-gallery-total>3</span>" in page
+
+
+# --- each user's own search and marks ----------------------------------------------
+
+
+@pytest.fixture
+def member(db) -> User:
+    return add_user(db, "noa", role=Role.MEMBER)
+
+
+def test_each_user_sees_listings_through_their_own_search(client, db, member):
+    small = add_listing(db, "small", price=5100, rooms=4.0)
+    big = add_listing(db, "big", price=5200, rooms=5.0, street="ביאליק")
+    mark_of(db, small, member).matches = False
+    db.commit()
+    mark_of(db, big, 1).matches = False
+    db.commit()
+
+    admin_page = client.get("/?tab=all").text
+    sign_in(client, "noa", PASSWORD)
+    member_page = client.get("/?tab=all").text
+
+    assert "5,100 ₪" in admin_page and "5,200 ₪" not in admin_page
+    assert "5,200 ₪" in member_page and "5,100 ₪" not in member_page
+
+
+def test_marks_and_notes_are_each_users_own(client, db, member):
+    listing = add_listing(db, "a", status=ListingStatus.NEW)
+
+    client.post(f"/listings/{listing.id}/status", data={"status": "hidden"})
+    client.post(f"/listings/{listing.id}/notes", data={"notes": "לא בשבילי"})
+    client.post("/listings/mark-seen")
+
+    assert (mark_of(db, listing, 1).status, mark_of(db, listing, 1).notes) == (
+        "hidden",
+        "לא בשבילי",
+    )
+    theirs = mark_of(db, listing, member)
+    assert (theirs.status, theirs.notes) == (ListingStatus.NEW, None)
+    sign_in(client, "noa", PASSWORD)
+    page = client.get("/?tab=new").text
+    assert "6,000 ₪" in page and "לא בשבילי" not in page
+
+
+def test_saving_a_search_changes_only_that_users_matches(client, db, member):
+    listing = add_listing(db, "a", rooms=5.0, matches=False)
+    sign_in(client, "noa", PASSWORD)
+
+    client.post(
+        "/settings/criteria",
+        data={"city": "ראשון לציון", "rooms_min": "5", "rooms_max": "5.5"},
+    )
+
+    assert mark_of(db, listing, member).matches is True
+    assert mark_of(db, listing, 1).matches is False
+    db.expire_all()
+    assert db.get(User, member.id).criteria["rooms_max"] == 5.5
+    assert db.get(User, 1).criteria is None
+
+
+def test_notification_settings_are_each_users_own(client, db, member):
+    client.post("/settings/preferences", data={"notifications_paused": "1"})
+
+    assert "התראות מושהות" in client.get("/settings").text
+    sign_in(client, "noa", PASSWORD)
+    assert "התראות מושהות" not in client.get("/settings").text
+
+
+def test_members_see_the_sources_but_only_admins_control_them(client, db, member):
+    admin_page = client.get("/sources").text
+    sign_in(client, "noa", PASSWORD)
+    member_page = client.get("/sources").text
+
+    run_button = 'hx-post="/sources/yad2/run"'
+    assert run_button in admin_page and "החיפוש המשולב" in admin_page
+    assert run_button not in member_page and "החיפוש המשולב" not in member_page
+    assert "כתובת חיפוש מותאמת" not in member_page
+    assert "יד2" in member_page
+    for action in ("run", "toggle", "settings"):
+        assert client.post(f"/sources/yad2/{action}", data={}).status_code == 403
+
+
+def test_the_combined_search_covers_every_active_user(client, db, member):
+    client.post(
+        "/settings/criteria", data={"city": "ראשון לציון", "rooms_min": "4", "rooms_max": "5"}
+    )
+    sign_in(client, "noa", PASSWORD)
+    client.post(
+        "/settings/criteria",
+        data={"city": "ראשון לציון", "rooms_min": "5", "rooms_max": "5.5", "price_max": "8000"},
+    )
+    sign_in(client, "admin", PASSWORD)
+
+    page = client.get("/sources").text
+
+    assert "ראשון לציון · 4-5.5 חדרים · כל המחירים" in page
+    assert "2 פעילים" in page
+
+
+def test_only_admins_set_the_night_hours(client, db, member):
+    response = client.post(
+        "/settings/schedule", data={"night_start": "01:00", "night_end": "05:00"},
+        follow_redirects=False,
+    )  # fmt: skip
+    assert response.status_code == 303
+    assert 'value="01:00"' in client.get("/settings").text
+
+    sign_in(client, "noa", PASSWORD)
+    assert "שעות לילה" not in client.get("/settings").text
+    assert client.post("/settings/schedule", data={"night_start": "02:00"}).status_code == 403
+    db.expire_all()
+    assert db.get(Setting, "schedule").value["night_start"] == "01:00:00"
+
+
+def test_neighborhoods_are_each_users_own(client, db, member):
+    client.post("/areas", data={"areas": ["רמז"], "unknown_area_ok": "1"})
+    chosen = re.compile(r'value="רמז" id="area-\d+"\s+checked')
+
+    assert chosen.search(client.get("/areas").text)
+    sign_in(client, "noa", PASSWORD)
+    assert not chosen.search(client.get("/areas").text)
+    db.expire_all()
+    assert db.get(User, 1).criteria["areas"] == ["רמז"]
+    assert db.get(User, member.id).criteria is None

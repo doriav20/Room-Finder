@@ -1,5 +1,7 @@
-"""Stores the listings a source returned and works out what the user should hear about."""
+"""Stores the listings a source returned and works out which users should hear about them."""
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -9,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from roomfinder import areas
 from roomfinder.dedupe import find_duplicate
 from roomfinder.matching import listing_matches
-from roomfinder.models import Listing, ListingStatus, PriceChange
+from roomfinder.models import Listing, ListingMark, ListingStatus, PriceChange
 from roomfinder.normalize import address_key, furniture_from_text, parking_from_text
 from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
+from roomfinder.searchers import FetchScope, Searcher, in_earlier_reach
 
 # A listing that disappeared from a healthy source for this long is considered taken down
 REMOVAL_GRACE = timedelta(hours=48)
@@ -28,9 +31,38 @@ class PriceDrop:
 class IngestOutcome:
     found: int = 0
     inserted: int = 0
-    to_notify: list[Listing] = field(default_factory=list)
+    # New on the market; marked "new" for each user whose search they fit
+    new: list[Listing] = field(default_factory=list)
     price_drops: list[PriceDrop] = field(default_factory=list)
+    # Listings the source returned only because it was read differently (e.g. a user widened
+    # their search), stored quietly: how many of them fit each user's search, by user id
+    already_listed: Counter[int] = field(default_factory=Counter)
     removed: int = 0
+
+
+def mark(listing: Listing, user_id: int) -> ListingMark:
+    """The user's mark on the listing, made when there's none yet."""
+    found = listing.marks.get(user_id)
+    if found is None:
+        found = listing.marks[user_id] = ListingMark(
+            user_id=user_id, matches=False, status=ListingStatus.SEEN
+        )
+    return found
+
+
+def judge(listing: Listing, searchers: Sequence[Searcher]) -> None:
+    """Note on each user's mark whether the listing fits their search."""
+    for searcher in searchers:
+        mark(listing, searcher.user_id).matches = listing_matches(listing, searcher.criteria)
+
+
+def interested(listing: Listing) -> list[int]:
+    """The users whose search the listing fits, unless they hid it."""
+    return [
+        user_id
+        for user_id, found in listing.marks.items()
+        if found.matches and found.status != ListingStatus.HIDDEN
+    ]
 
 
 def _apply(listing: Listing, item: ListingData, now: datetime) -> None:
@@ -76,8 +108,9 @@ def _apply(listing: Listing, item: ListingData, now: datetime) -> None:
 async def _insert(
     session: AsyncSession,
     item: ListingData,
-    criteria: SearchCriteria,
-    baseline: bool,
+    searchers: Sequence[Searcher],
+    previous: FetchScope | None,
+    current: FetchScope,
     now: datetime,
     outcome: IngestOutcome,
 ) -> None:
@@ -85,51 +118,62 @@ async def _insert(
         source=item.source, source_id=item.source_id, first_seen_at=now, images=[], features=[]
     )
     _apply(listing, item, now)
-    listing.matches = listing_matches(listing, criteria)
+    judge(listing, searchers)
     session.add(listing)
     await session.flush()
     outcome.inserted += 1
 
     duplicate = await find_duplicate(session, listing, now)
+    hidden_by: set[int] = set()
     if duplicate is not None:
         listing.duplicate_of_id = duplicate.id
-        if duplicate.status == ListingStatus.HIDDEN:
-            listing.status = ListingStatus.HIDDEN
-            return
+        hidden_by = {
+            user_id
+            for user_id, found in duplicate.marks.items()
+            if found.status == ListingStatus.HIDDEN
+        }
 
     # A duplicate of a listing that is still up is old news; one of a taken-down listing is
     # the apartment coming back to the market
     is_news = duplicate is None or duplicate.removed_at is not None
-    if listing.matches and is_news and not baseline:
-        listing.status = ListingStatus.NEW
-        outcome.to_notify.append(listing)
-    else:
-        listing.status = ListingStatus.SEEN
+    if is_news and not in_earlier_reach(previous, current, listing):
+        if duplicate is None:
+            outcome.already_listed.update(
+                user_id for user_id, found in listing.marks.items() if found.matches
+            )
+        is_news = False
+    for user_id, found in listing.marks.items():
+        if user_id in hidden_by:
+            found.status = ListingStatus.HIDDEN
+        elif found.matches and is_news:
+            found.status = ListingStatus.NEW
+    if any(found.status == ListingStatus.NEW for found in listing.marks.values()):
+        outcome.new.append(listing)
 
 
 def _update(
     listing: Listing,
     item: ListingData,
-    criteria: SearchCriteria,
-    baseline: bool,
+    searchers: Sequence[Searcher],
+    previous: FetchScope | None,
+    current: FetchScope,
     now: datetime,
     session: AsyncSession,
     outcome: IngestOutcome,
 ) -> None:
     old_price = listing.price
     _apply(listing, item, now)
-    listing.matches = listing_matches(listing, criteria)
+    judge(listing, searchers)
 
     new_price = listing.price
     if old_price is None or new_price is None or new_price == old_price:
         return
     session.add(PriceChange(listing=listing, old_price=old_price, new_price=new_price, seen_at=now))
+    # Seen only through a new reading of the source, the drop may be long past
     if (
         new_price < old_price
-        and not baseline
-        and listing.matches
-        and listing.status != ListingStatus.HIDDEN
         and listing.duplicate_of_id is None
+        and in_earlier_reach(previous, current, listing)
     ):
         outcome.price_drops.append(PriceDrop(listing, old_price, new_price))
 
@@ -138,15 +182,17 @@ async def ingest(
     session: AsyncSession,
     source: str,
     items: list[ListingData],
-    criteria: SearchCriteria,
+    searchers: Sequence[Searcher],
     *,
-    baseline: bool,
+    previous: FetchScope | None,
+    current: FetchScope,
     now: datetime,
 ) -> IngestOutcome:
-    """Insert or update the listings a source returned in one run.
+    """Insert or update the listings a source returned in one run, and judge them for everyone.
 
-    In a baseline run (the first run, or after the search changed) everything is recorded
-    silently, so the user isn't flooded with listings that were already on the market.
+    previous is what the source was read with before (None the first time), and current what
+    it was read with now. Listings that only the current reading reaches are recorded quietly,
+    so nobody is flooded with listings that were already on the market.
     """
     outcome = IngestOutcome(found=len(items))
     existing = {
@@ -160,15 +206,15 @@ async def ingest(
         handled.add(item.source_id)
         listing = existing.get(item.source_id)
         if listing is None:
-            await _insert(session, item, criteria, baseline, now, outcome)
+            await _insert(session, item, searchers, previous, current, now, outcome)
         else:
-            _update(listing, item, criteria, baseline, now, session, outcome)
+            _update(listing, item, searchers, previous, current, now, session, outcome)
     await session.flush()
     return outcome
 
 
 def apply_details(
-    listing: Listing, details: ListingDetails | None, criteria: SearchCriteria, now: datetime
+    listing: Listing, details: ListingDetails | None, searchers: Sequence[Searcher], now: datetime
 ) -> None:
     """Add what the listing's own page says, then judge the listing again."""
     listing.details_checked_at = now
@@ -195,7 +241,7 @@ def apply_details(
         )
     if listing.parking is None:
         listing.parking = parking_from_text(listing.description)
-    listing.matches = listing_matches(listing, criteria)
+    judge(listing, searchers)
 
 
 async def mark_removed(session: AsyncSession, source: str, now: datetime) -> int:
@@ -212,22 +258,31 @@ async def mark_removed(session: AsyncSession, source: str, now: datetime) -> int
     return result.rowcount or 0
 
 
-async def rematch_all(session: AsyncSession, criteria: SearchCriteria) -> None:
-    """Judge every stored listing again, after the search changed."""
+async def rematch_user(session: AsyncSession, user_id: int, criteria: SearchCriteria) -> int:
+    """Judge every stored listing against one user's search, after it changed or for a new
+    user. Returns how many listings fit."""
+    fitting = 0
     for listing in await session.scalars(select(Listing)):
-        listing.matches = listing_matches(listing, criteria)
+        found = mark(listing, user_id)
+        found.matches = listing_matches(listing, criteria)
+        fitting += found.matches
+    return fitting
 
 
-async def refresh_areas(session: AsyncSession, criteria: SearchCriteria) -> int:
-    """Place stored listings in neighborhoods again, e.g. after the neighborhood map changed.
+async def refresh_listings(session: AsyncSession, searchers: Sequence[Searcher]) -> int:
+    """Place stored listings in neighborhoods again (e.g. after the neighborhood map changed),
+    and judge any listing that a user has no mark on yet.
 
     Returns how many listings moved.
     """
     moved = 0
+    users = {searcher.user_id for searcher in searchers}
     for listing in await session.scalars(select(Listing)):
         area = areas.locate(listing)
         if area != listing.area:
             listing.area = area
-            listing.matches = listing_matches(listing, criteria)
             moved += 1
+            judge(listing, searchers)
+        elif not users.issubset(listing.marks):
+            judge(listing, searchers)
     return moved
