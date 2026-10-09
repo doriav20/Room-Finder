@@ -1,0 +1,16 @@
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff">
+  {# Picks the theme before anything is drawn, so a dark page doesn't flash white first.
+     A choice made with the navbar's button is kept in the browser; without one the
+     theme follows the device's (app.js switches it when the device does) #}
+  <script>
+    (() => {
+      let theme = null;
+      try { theme = localStorage.getItem("theme"); } catch (error) {}
+      if (theme !== "light" && theme !== "dark") {
+        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.dataset.bsTheme = theme;
+      document.querySelector('meta[name="theme-color"]').content = theme === "dark" ? "#212529" : "#ffffff";
+    })();
+  </script>

@@ -8,6 +8,49 @@ document.addEventListener("click", (event) => {
   toggle.setAttribute("aria-expanded", String(open));
 });
 
+// Light or dark: the navbar's button goes from following the device, to light, to dark and back.
+// The page's <head> already applied the theme before it was drawn (partials/theme_head.html).
+(function () {
+  const button = document.getElementById("theme-toggle");
+  const deviceDark = matchMedia("(prefers-color-scheme: dark)");
+  const choices = {
+    auto: ["🌓", "ערכת צבעים: לפי המכשיר"],
+    light: ["☀️", "ערכת צבעים: בהירה"],
+    dark: ["🌙", "ערכת צבעים: כהה"],
+  };
+  let choice = "auto";
+  try {
+    const saved = localStorage.getItem("theme");
+    if (saved in choices) choice = saved;
+  } catch (error) {
+    // Without storage the choice lasts until the next page
+  }
+
+  const apply = () => {
+    const theme = choice === "auto" ? (deviceDark.matches ? "dark" : "light") : choice;
+    document.documentElement.dataset.bsTheme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#212529" : "#ffffff");
+    if (!button) return;
+    const [icon, label] = choices[choice];
+    button.textContent = icon;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  };
+
+  button?.addEventListener("click", () => {
+    choice = { auto: "light", light: "dark", dark: "auto" }[choice];
+    try {
+      if (choice === "auto") localStorage.removeItem("theme");
+      else localStorage.setItem("theme", choice);
+    } catch (error) {
+      // As above
+    }
+    apply();
+  });
+  deviceDark.addEventListener("change", apply);
+  apply();
+})();
+
 // A dropdown of checkboxes (the sites filter): picking several sites takes several clicks,
 // so the filter is applied once, when the list closes, rather than on every click
 document.querySelectorAll("details.multi-select").forEach((dropdown) => {
