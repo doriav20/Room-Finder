@@ -27,7 +27,7 @@ from sqlalchemy.orm import aliased
 from roomfinder import areas
 from roomfinder.config import NOVNC_PAGE, Settings
 from roomfinder.db import utcnow
-from roomfinder.labels import area_note, furniture_label, parking_label
+from roomfinder.labels import area_note, directions_url, furniture_label, parking_label
 from roomfinder.matching import listing_matches
 from roomfinder.models import (
     Listing,
@@ -120,6 +120,7 @@ def configure_templates(settings: Settings) -> None:
     filters["local_datetime"] = lambda moment: formatting.local_datetime(moment, settings.timezone)
     filters["furniture_label"] = furniture_label
     filters["parking_label"] = parking_label
+    filters["directions_url"] = directions_url
     # Pages that render cards outside a search (e.g. after a status change) pass no search
     filters["highlight"] = lambda text, search=None: (search or TextSearch()).highlight(text)
 
@@ -512,6 +513,7 @@ async def listings_map(request: Request) -> JSONResponse:
                 "area": listing.area,
                 "image": listing.images[0] if listing.images else None,
                 "url": listing.url,
+                "directions": directions_url(listing, copies[listing.id]),
                 "status": _status_of(listing, user_id),
                 "source": labels.get(listing.source, listing.source),
             }

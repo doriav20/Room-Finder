@@ -41,7 +41,7 @@ from telegram.ext import (
 
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
-from roomfinder.labels import area_note, furniture_label, parking_label
+from roomfinder.labels import area_note, directions_url, furniture_label, parking_label
 from roomfinder.models import (
     Listing,
     ListingMark,
@@ -171,13 +171,17 @@ def listing_keyboard(listing: Listing, status: str) -> InlineKeyboardMarkup:
     favorite = status == ListingStatus.FAVORITE
     hidden = status == ListingStatus.HIDDEN
     top = [InlineKeyboardButton("🔗 למודעה", url=listing.url)]
+    # Google Maps opens with the apartment as the start; the destination is typed there
+    if directions := directions_url(listing):
+        top.append(InlineKeyboardButton("🧭 מסלול מכאן", url=directions))
+    rows = [top]
     # An album can't carry buttons, so the rest of the photos come on request
     if photos := more_photos(listing):
         label = f"📷 עוד {len(photos)} תמונות" if len(photos) > 1 else "📷 עוד תמונה"
-        top.append(InlineKeyboardButton(label, callback_data=f"photos:{listing.id}"))
+        rows.append([InlineKeyboardButton(label, callback_data=f"photos:{listing.id}")])
     return InlineKeyboardMarkup(
         [
-            top,
+            *rows,
             [
                 InlineKeyboardButton(
                     "✅ במועדפים" if favorite else "⭐ שמור", callback_data=f"fav:{listing.id}"

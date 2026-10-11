@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import timedelta
+from urllib.parse import quote_plus
 
 import pytest
 from markupsafe import escape
@@ -398,6 +399,7 @@ def test_map_places_listings_by_their_point_a_copy_or_their_neighborhood(client,
     assert (by_price[5100]["lat"], by_price[5100]["approximate"]) == (31.97, False)
     assert (by_price[5200]["lat"], by_price[5200]["lng"]) == (31.96, 34.8)
     assert by_price[5300]["approximate"] is True
+    assert by_price[5100]["directions"].endswith(f"origin={quote_plus('א 12, ראשון לציון')}")
     assert data["without_location"] == 1
     assert data["bounds"] is not None and data["areas"] == []
 
@@ -419,6 +421,9 @@ def test_cards_show_every_photo(client, db):
 
     assert all(f'src="{photo}"' in page for photo in photos)
     assert page.count("gallery-next") == 1  # only the card with several photos
+    assert page.count("🧭 מסלול מכאן") == 2
+    origin = quote_plus("ביאליק 12, ראשון לציון")
+    assert f'href="https://www.google.com/maps/dir/?api=1&amp;origin={origin}"' in page
     assert "<span data-gallery-total>3</span>" in page
 
 

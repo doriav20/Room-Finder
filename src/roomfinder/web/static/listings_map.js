@@ -59,6 +59,14 @@
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     box.append(link);
+    if (listing.directions) {
+      // Google Maps opens with the apartment as the start; the destination is typed there
+      const directions = make("a", "btn btn-sm btn-outline-primary mt-2 ms-1", "🧭 מסלול מכאן");
+      directions.href = listing.directions;
+      directions.target = "_blank";
+      directions.rel = "noopener noreferrer";
+      box.append(directions);
+    }
     return box;
   };
 

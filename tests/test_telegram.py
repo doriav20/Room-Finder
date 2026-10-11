@@ -1,5 +1,6 @@
 from datetime import timedelta
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from sqlalchemy import select
@@ -200,14 +201,32 @@ def test_keyboard_reflects_the_users_status():
     assert keyboard[0][0].url == "https://www.yad2.co.il/realestate/item/abc"
     assert [button.text for button in keyboard[1]] == ["✅ במועדפים", "🙈 לא רלוונטי"]
     assert [button.callback_data for button in keyboard[1]] == ["fav:7", "hide:7"]
-    assert len(keyboard[0]) == 1  # one photo, and the message shows it
+    assert len(keyboard) == 2  # one photo, and the message shows it
+
+
+def test_keyboard_links_to_directions_from_the_apartment():
+    listing = make_listing(city="ראשון לציון")
+    by_point = make_listing(house_number=None, latitude=31.97, longitude=34.79)
+    nowhere = make_listing(street=None, house_number=None, neighborhood=None)
+
+    [_, directions] = listing_keyboard(listing, "new").inline_keyboard[0]
+    [_, from_point] = listing_keyboard(by_point, "new").inline_keyboard[0]
+
+    assert directions.text == "🧭 מסלול מכאן"
+    assert parse_qs(urlsplit(directions.url).query) == {
+        "api": ["1"],
+        "origin": ["הרצל 12, ראשון לציון"],
+    }
+    assert directions.url.startswith("https://www.google.com/maps/dir/?")
+    assert parse_qs(urlsplit(from_point.url).query)["origin"] == ["31.97,34.79"]
+    assert len(listing_keyboard(nowhere, "new").inline_keyboard[0]) == 1
 
 
 def test_keyboard_offers_the_rest_of_the_photos():
     photos = [f"https://img.yad2.co.il/Pic/{index}.jpeg" for index in range(15)]
 
-    [link, more] = listing_keyboard(make_listing(images=photos), "new").inline_keyboard[0]
-    [_, one_more] = listing_keyboard(make_listing(images=photos[:2]), "new").inline_keyboard[0]
+    [more] = listing_keyboard(make_listing(images=photos), "new").inline_keyboard[1]
+    [one_more] = listing_keyboard(make_listing(images=photos[:2]), "new").inline_keyboard[1]
 
     assert (more.text, more.callback_data) == ("📷 עוד 10 תמונות", "photos:7")
     assert one_more.text == "📷 עוד תמונה"
