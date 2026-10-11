@@ -30,11 +30,13 @@
     <div class="fw-semibold">
       {{ l.rooms | rooms }} חדרים{% if l.sqm %} · {{ l.sqm }} מ״ר{% endif %}{% if l.floor is not none %} · {{ l.floor | floor }}{% endif %}
     </div>
-    <div class="text-body-secondary">
-      📍 {{ card.address | highlight(search) or 'כתובת לא צוינה' }}{% if card.area_note %} <span class="small" title="השכונה לפי מפת העירייה">(לפי המפה: {{ card.area_note }})</span>{% endif %}
+    <div class="text-body-secondary d-flex align-items-start justify-content-between gap-2 mt-1">
+      <div>
+        📍 {{ card.address | highlight(search) or 'כתובת לא צוינה' }}{% if card.area_note %} <span class="small" title="השכונה לפי מפת העירייה">(לפי המפה: {{ card.area_note }})</span>{% endif %}
+      </div>
       {# Google Maps opens with the apartment as the start; the destination is typed there #}
       {% set directions = l | directions_url(card.duplicates) %}
-      {% if directions %}<a class="small text-nowrap ms-1" href="{{ directions }}" target="_blank" rel="noopener noreferrer" title="מסלול בגוגל מפות שיוצא מהדירה">🧭 מסלול מכאן</a>{% endif %}
+      {% if directions %}<a class="directions-link" href="{{ directions }}" target="_blank" rel="noopener noreferrer" title="מסלול בגוגל מפות שיוצא מהדירה">מסלול</a>{% endif %}
     </div>
     <div class="mt-2 d-flex flex-wrap gap-1">
       {% if l.is_agency is true %}<span class="chip">תיווך</span>{% elif l.is_agency is false %}<span class="chip chip-private">פרטי</span>{% endif %}

@@ -54,19 +54,22 @@
     if (listing.approximate) {
       box.append(make("div", "small text-warning-emphasis", "מיקום משוער, באמצע השכונה שבמודעה"));
     }
-    const link = make("a", "btn btn-sm btn-primary mt-2", `למודעה ב${listing.source} ↗`);
+    const link = make("a", "btn btn-sm btn-primary",`למודעה ב${listing.source} ↗`);
     link.href = listing.url;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    box.append(link);
+    const actions = make("div", "d-flex align-items-center justify-content-between gap-2 mt-2");
+    actions.append(link);
     if (listing.directions) {
       // Google Maps opens with the apartment as the start; the destination is typed there
-      const directions = make("a", "btn btn-sm btn-outline-primary mt-2 ms-1", "🧭 מסלול מכאן");
+      const directions = make("a", "directions-link", "מסלול");
       directions.href = listing.directions;
       directions.target = "_blank";
       directions.rel = "noopener noreferrer";
-      box.append(directions);
+      directions.title = "מסלול בגוגל מפות שיוצא מהדירה";
+      actions.append(directions);
     }
+    box.append(actions);
     return box;
   };
 

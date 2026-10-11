@@ -421,7 +421,7 @@ def test_cards_show_every_photo(client, db):
 
     assert all(f'src="{photo}"' in page for photo in photos)
     assert page.count("gallery-next") == 1  # only the card with several photos
-    assert page.count("🧭 מסלול מכאן") == 2
+    assert page.count('class="directions-link"') == 2
     origin = quote_plus("ביאליק 12, ראשון לציון")
     assert f'href="https://www.google.com/maps/dir/?api=1&amp;origin={origin}"' in page
     assert "<span data-gallery-total>3</span>" in page

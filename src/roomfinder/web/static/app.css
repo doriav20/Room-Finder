@@ -179,6 +179,43 @@ body {
   color: var(--bs-danger-text-emphasis);
 }
 
+/* Opens Google Maps with the apartment as the start: a pill at the end of the address line */
+.directions-link,
+.leaflet-container a.directions-link {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--bs-primary-border-subtle);
+  border-radius: 999px;
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary-text-emphasis);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.directions-link:hover,
+.leaflet-container a.directions-link:hover {
+  border-color: var(--bs-primary);
+  background: var(--bs-primary);
+  color: #fff;
+}
+
+/* A navigation arrow in the text's own color */
+.directions-link::before {
+  content: "";
+  width: 0.8em;
+  height: 0.8em;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M14.6 1.4 1.2 6.9l5.6 2.3 2.3 5.6z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
 .listing-description p {
   white-space: pre-line;
 }
@@ -465,6 +502,10 @@ body {
   /* Big enough for a thumb */
   .listing-actions .btn {
     padding-block: 0.45rem;
+  }
+
+  .directions-link {
+    padding: 0.3rem 0.75rem;
   }
 
   .listing-photo {
