@@ -46,6 +46,12 @@
       {% if parking %}<span class="chip {{ 'chip-yes' if l.parking else 'chip-no' }}">🚗 {{ parking }}</span>{% endif %}
       {% for feature in l.features[:6] if not (parking and feature == 'חניה') %}<span class="chip chip-feature">{{ feature }}</span>{% endfor %}
     </div>
+    {% if card.bus %}
+    {# The walk to each bus line the user chose; "~" until it is worked out on the streets #}
+    <div class="mt-1 d-flex flex-wrap gap-1">
+      {% for walk in card.bus %}<span class="chip{% if walk.minutes <= bus_limit %} chip-yes{% endif %}" title="הליכה לתחנה {{ walk.stop.name }}, קו {{ walk.line.number }} של {{ walk.line.agency }}{% if walk.estimated %} (הערכה לפי המרחק){% endif %}">🚌 {{ walk.line.number }} · {% if walk.estimated %}~{% endif %}{{ walk.minutes }} דק׳</span>{% endfor %}
+    </div>
+    {% endif %}
     {% if l.description or l.furniture_details %}
     {# Open when the searched words are in it, so the match shows without a click #}
     <details class="small mt-2 listing-description"{% if search and search.found_in((l.description or '') ~ ' ' ~ (l.furniture_details or '')) %} open{% endif %}>

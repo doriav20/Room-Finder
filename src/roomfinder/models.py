@@ -47,6 +47,9 @@ class Listing(Base):
     longitude: Mapped[float | None]
     # The official neighborhood from the city's map (areas.py), when it can be told
     area: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Walks from the listing's map point to bus stops, in seconds by the stop's code
+    # (walking.py): {"at": [latitude, longitude], "stops": {"34567": 240}}
+    walks: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     is_agency: Mapped[bool | None]
     entry_date: Mapped[str | None] = mapped_column(String(64))
     images: Mapped[list[str]] = mapped_column(JSON, default=list)

@@ -5,7 +5,9 @@ from datetime import time, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from conftest import HOME, ROUTING_URL, bus_line
 from roomfinder import runner as runner_module
+from roomfinder import walking
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.models import Listing, ListingStatus, Role, RunStatus, SourceRun, SourceState, User
@@ -476,3 +478,77 @@ def test_next_delay_uses_night_interval_jitter_and_backoff():
     assert 10 * 60 * 0.75 <= day <= 10 * 60 * 1.25
     assert 30 * 60 * 0.75 <= night <= 30 * 60 * 1.25
     assert backoff <= MAX_BACKOFF_MINUTES * 60 * 1.25
+
+
+def placed(*ids: str) -> FetchResult:
+    """Listings with a point on the map, 110 meters from the stop of line 17 below."""
+    result = listings(*ids)
+    for listing in result.listings:
+        listing.latitude, listing.longitude = HOME
+    return result
+
+
+@pytest.fixture
+async def wants_a_bus(sessionmaker, runner, admin):
+    runner.settings.routing_url = ROUTING_URL
+    line = bus_line("17", (HOME[0] + 0.001, HOME[1]))
+    await change_user(
+        sessionmaker, admin, criteria=SearchCriteria(bus_lines=[line], bus_max_minutes=5)
+    )
+    return line
+
+
+async def test_the_walk_to_the_bus_is_worked_out_before_notifying(
+    runner, source, notifier, sessionmaker, admin, wants_a_bus, monkeypatch
+):
+    async def a_long_way_round(client, routing_url, points, stops):
+        return [{stop.code: 900 for stop in stops} for _ in points]
+
+    monkeypatch.setattr(walking, "walk_table", a_long_way_round)
+    source.results = [placed("a"), placed("a", "b")]
+
+    await runner.run("fake")
+    report = await runner.run("fake")
+
+    # Near as the crow flies, but a quarter of an hour on the streets
+    assert report.status == RunStatus.OK
+    assert notifier.new == []
+    async with sessionmaker() as session:
+        for source_id in ("a", "b"):
+            listing = await session.scalar(select(Listing).where(Listing.source_id == source_id))
+            assert listing.walks["stops"] == {"171": 900}
+            assert (listing.marks[admin].matches, listing.marks[admin].status) == (
+                False,
+                ListingStatus.SEEN,
+            )
+        run = await session.scalar(select(SourceRun).order_by(SourceRun.id.desc()))
+        assert run.new == 0
+
+
+async def test_a_new_listing_near_the_bus_is_sent_with_its_walk(
+    runner, source, notifier, admin, wants_a_bus, monkeypatch
+):
+    async def around_the_corner(client, routing_url, points, stops):
+        return [{stop.code: 150 for stop in stops} for _ in points]
+
+    monkeypatch.setattr(walking, "walk_table", around_the_corner)
+    source.results = [placed("a"), placed("a", "b")]
+
+    await runner.run("fake")
+    await runner.run("fake")
+
+    assert notifier.new == [(admin, "b", False)]
+    assert notifier.new_listings[0].walks["stops"] == {"171": 150}
+
+
+async def test_a_routing_server_that_is_down_does_not_stop_the_notifications(
+    runner, source, notifier, admin, wants_a_bus
+):
+    # conftest keeps the tests offline, so no walk can be worked out
+    source.results = [placed("a"), placed("a", "b")]
+
+    await runner.run("fake")
+    report = await runner.run("fake")
+
+    assert report.status == RunStatus.OK
+    assert notifier.new == [(admin, "b", False)]

@@ -1,5 +1,6 @@
 import contextlib
 
+import httpx
 import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
@@ -11,19 +12,50 @@ from sqlalchemy.pool import StaticPool
 from roomfinder import (
     auth,
     models,  # noqa: F401 - registers the tables
+    transit,
 )
 from roomfinder.config import Settings
 from roomfinder.db import Base, create_sessionmaker, utcnow
 from roomfinder.main import create_app
 from roomfinder.models import Listing, ListingMark, ListingStatus, Role, User
+from roomfinder.schemas import BusLine, BusStop
 
 PASSWORD = "correct horse battery"
+# A point in Rishon LeZion, for listings and the bus stops around them
+HOME = (31.96, 34.8)
+ROUTING_URL = "http://routing.test"
 
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch):
     """Tests must never talk to the real bot configured in the developer's .env."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """Tests must never ask the bus lines service or a routing server."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Tests are offline", request=request)
+
+    monkeypatch.setattr(
+        transit, "new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(refuse))
+    )
+
+
+def bus_line(number: str, *points: tuple[float, float]) -> BusLine:
+    """A line with a stop at each (latitude, longitude); the stops of line 17 are 171, 172..."""
+    return BusLine(
+        key=f"3-{number}",
+        number=number,
+        agency="אגד",
+        description="קניון הזהב ⇄ ת. רכבת משה דיין",
+        stops=[
+            BusStop(code=f"{number}{index}", name=f"תחנה {index}", lat=lat, lon=lon)
+            for index, (lat, lon) in enumerate(points, 1)
+        ],
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -12,6 +12,7 @@ services:
         required: false
     environment:
       TZ: Asia/Jerusalem
+      ROUTING_URL: http://routing:5000
     ports:
       # The dashboard, the only way in (sign-in required; the container's browser is inside it)
       - "127.0.0.1:8000:8000"
@@ -26,6 +27,41 @@ services:
       options:
         max-size: 10m
         max-file: "5"
+
+  # Works out the walks from listings to bus stops, on OpenStreetMap's streets (see
+  # walking.py). Reached only by the app. The first start downloads the map of Israel
+  # (about 120MB) and prepares it for walking, which takes a few minutes; until then the
+  # walks are estimates. To get a newer map: docker compose rm -sf routing, then
+  # docker volume rm roomfinder_routing-data, then docker compose up -d
+  routing:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    container_name: roomfinder-routing
+    environment:
+      MAP_URL: https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf
+    volumes:
+      - routing-data:/data
+    working_dir: /data
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ ! -f ready ]; then
+          echo "Preparing the map for walking (once; a few minutes)"
+          rm -f map.osrm* map.osm.pbf
+          wget -q -O map.osm.pbf "$$MAP_URL"
+          osrm-extract -p /opt/foot.lua map.osm.pbf
+          osrm-partition map.osrm
+          osrm-customize map.osrm
+          rm map.osm.pbf
+          touch ready
+        fi
+        exec osrm-routed --algorithm mld --max-table-size 1000 map.osrm
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
 
   # The dashboard on your own domain through a Cloudflare Tunnel (see HOSTING.md). It connects
   # out to Cloudflare, so no router port is opened. Runs only with COMPOSE_PROFILES=tunnel in .env
@@ -47,3 +83,4 @@ services:
 
 volumes:
   roomfinder-data:
+  routing-data:

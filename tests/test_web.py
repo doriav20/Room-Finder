@@ -6,7 +6,8 @@ from urllib.parse import quote_plus
 import pytest
 from markupsafe import escape
 
-from conftest import PASSWORD, add_listing, add_user, mark_of, sign_in
+from conftest import HOME, PASSWORD, add_listing, add_user, bus_line, mark_of, sign_in
+from roomfinder import transit
 from roomfinder.db import utcnow
 from roomfinder.models import ListingStatus, PriceChange, Role, Setting, User
 from roomfinder.schemas import SearchCriteria
@@ -576,3 +577,110 @@ def test_neighborhoods_are_each_users_own(client, db, member):
     db.expire_all()
     assert db.get(User, 1).criteria["areas"] == ["רמז"]
     assert db.get(User, member.id).criteria is None
+
+
+@pytest.fixture
+def bus_service(monkeypatch):
+    """Line 17 of two towns, as the bus lines service would tell of them."""
+    ours = bus_line("17", (HOME[0] + 0.001, HOME[1]))
+    ours.description = "קניון הזהב-ראשון לציון ⇄ ת. רכבת משה דיין-ראשון לציון"
+    theirs = transit.LineCandidate("25-27017", "17", "אלקטרה אפיקים", "אשדוד ⇄ גן יבנה")
+
+    async def find_lines(number):
+        if number != "17":
+            return []
+        return [theirs, transit.LineCandidate(ours.key, "17", ours.agency, ours.description)]
+
+    async def fetch_line(key):
+        if key != ours.key:
+            raise transit.TransitError("down")
+        return ours
+
+    monkeypatch.setattr(transit, "find_lines", find_lines)
+    monkeypatch.setattr(transit, "fetch_line", fetch_line)
+    return ours
+
+
+def test_bus_lines_are_found_by_number_with_the_users_town_first(client, bus_service):
+    found = client.get("/settings/bus-lines/search", params={"number": " 17 "}).text
+
+    assert found.index("אגד") < found.index("אלקטרה אפיקים")
+    assert 'name="key" value="3-17"' in found
+    assert "לא נמצא קו 99" in client.get("/settings/bus-lines/search?number=99").text
+
+
+def test_choosing_a_bus_line_shows_the_walk_on_the_cards(client, db, bus_service):
+    add_listing(db, "near", latitude=HOME[0], longitude=HOME[1])
+    add_listing(db, "unplaced")
+
+    response = client.post("/settings/bus-lines", data={"key": "3-17"}, follow_redirects=False)
+
+    assert response.headers["location"] == "/settings?saved=bus#bus"
+    db.expire_all()
+    saved = db.get(User, 1).criteria["bus_lines"]
+    assert [(line["number"], len(line["stops"])) for line in saved] == [("17", 1)]
+    settings = client.get("/settings").text
+    assert "<strong>קו 17</strong> · אגד" in settings and "1 תחנות" in settings
+    # An estimate until the walk is worked out (tests are offline)
+    page = client.get("/?tab=all").text
+    assert page.count("🚌 17 · ~2 דק׳") == 1
+    assert "עד 5 דק׳ הליכה לקו 17" in page
+    # Already chosen lines aren't offered again, and reading one again doesn't double it
+    assert "נבחר" in client.get("/settings/bus-lines/search?number=17").text
+    client.post("/settings/bus-lines", data={"key": "3-17"})
+    db.expire_all()
+    assert len(db.get(User, 1).criteria["bus_lines"]) == 1
+
+
+def test_listings_far_from_the_chosen_bus_lines_stop_fitting(client, db, bus_service):
+    near = add_listing(db, "near", latitude=HOME[0], longitude=HOME[1])
+    far = add_listing(db, "far", latitude=HOME[0] + 0.02, longitude=HOME[1])
+    unplaced = add_listing(db, "unplaced")
+    client.post("/settings/bus-lines", data={"key": "3-17"})
+
+    assert [mark_of(db, listing).matches for listing in (near, far, unplaced)] == [
+        True,
+        False,
+        True,
+    ]
+
+    rule = client.post(
+        "/settings/bus-rule",
+        data={"bus_rule": "show", "bus_max_minutes": "8"},
+        follow_redirects=False,
+    )
+    assert rule.headers["location"] == "/settings?saved=bus_rule#bus"
+    assert mark_of(db, far).matches
+    assert (db.get(User, 1).criteria["bus_rule"], db.get(User, 1).criteria["bus_max_minutes"]) == (
+        "show",
+        8,
+    )
+    bad = {"bus_rule": "never", "bus_max_minutes": "8"}
+    assert client.post("/settings/bus-rule", data=bad).status_code == 400
+    assert client.post("/settings/bus-rule", data={"bus_rule": "all"}).status_code == 400
+
+
+def test_saving_the_search_keeps_the_bus_lines_and_removing_one_drops_it(client, db, bus_service):
+    client.post("/settings/bus-lines", data={"key": "3-17"})
+    client.post("/settings/bus-rule", data={"bus_rule": "all", "bus_max_minutes": "7"})
+
+    client.post(
+        "/settings/criteria", data={"city": "ראשון לציון", "rooms_min": "3", "rooms_max": "4"}
+    )
+    db.expire_all()
+    saved = db.get(User, 1).criteria
+    assert (len(saved["bus_lines"]), saved["bus_rule"], saved["bus_max_minutes"]) == (1, "all", 7)
+
+    client.post("/settings/bus-lines/3-17/delete")
+    db.expire_all()
+    assert db.get(User, 1).criteria["bus_lines"] == []
+
+
+def test_a_bus_lines_service_that_is_down_is_said_plainly(client, db, bus_service):
+    response = client.post("/settings/bus-lines", data={"key": "9-99"}, follow_redirects=False)
+
+    assert response.headers["location"] == "/settings?failed=bus#bus"
+    assert "לא הצלחתי לקרוא את התחנות" in client.get("/settings?failed=bus").text
+    assert client.post("/settings/bus-lines", data={"key": "nonsense"}).status_code == 400
+    db.expire_all()
+    assert not (db.get(User, 1).criteria or {}).get("bus_lines")

@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 from telegram.error import BadRequest
 
+from conftest import HOME, bus_line
 from roomfinder.config import Settings
 from roomfinder.models import Listing, ListingMark, ListingStatus, Notification, TelegramChat, User
 from roomfinder.notify.telegram import (
@@ -160,6 +161,20 @@ def test_message_shows_furniture_and_parking_when_known():
     assert "🛋 מרוהטת · 🚗 2 חניות" in format_new_listing(furnished, "יד2").splitlines()
     assert '✨ ממ"ד' in format_new_listing(furnished, "יד2").splitlines()
     assert "🛋 מרוהטת חלקית · 🚗 אין חניה" in format_new_listing(partial, "יד2").splitlines()
+
+
+def test_message_tells_the_walk_to_each_bus_line_the_user_wants():
+    lines = [bus_line("17", (HOME[0] + 0.001, HOME[1])), bus_line("25", (HOME[0] + 0.005, HOME[1]))]
+    listing = make_listing(
+        latitude=HOME[0], longitude=HOME[1], walks={"at": list(HOME), "stops": {"171": 200}}
+    )
+
+    text = format_new_listing(listing, "יד2", lines)
+
+    # The walk to line 25 wasn't worked out on the streets yet
+    assert "🚌 קו 17: 3 דק׳ הליכה · קו 25: ~9 דק׳ הליכה" in text.splitlines()
+    assert "🚌" not in format_new_listing(make_listing(), "יד2", lines)
+    assert "🚌" not in format_new_listing(listing, "יד2")
 
 
 def test_message_names_the_neighborhood_on_the_map_when_the_site_says_otherwise():

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
     # Mark the sign-in cookie HTTPS-only; needed behind an HTTPS proxy that talks HTTP to us
     cookie_secure: bool = False
+    # The OSRM server that works out walks to bus stops (the "routing" service in
+    # compose.yaml); without one the walks are only estimated from the distance
+    routing_url: str = ""
 
     def link(self, path: str, **params: str) -> str:
         """A full address in the dashboard, for links that are sent or copied elsewhere."""

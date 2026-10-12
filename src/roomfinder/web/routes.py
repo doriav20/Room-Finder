@@ -8,6 +8,7 @@ import asyncio
 import csv
 import hashlib
 import io
+import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import time, timedelta
@@ -24,7 +25,7 @@ from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from roomfinder import areas
+from roomfinder import areas, transit, walking
 from roomfinder.config import NOVNC_PAGE, Settings
 from roomfinder.db import utcnow
 from roomfinder.labels import area_note, directions_url, furniture_label, parking_label
@@ -62,9 +63,11 @@ from roomfinder.web.security import require_admin, require_user
 # Every page here needs a signed-in user (see web/accounts.py for signing in)
 router = APIRouter(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 DESTINATION_LIMIT = 200
+MAX_BUS_LINES = 10
 PAGE_SIZE = 48
 # The map shows a tab's listings all at once, up to this many
 MAP_LIMIT = 1000
@@ -159,6 +162,8 @@ def _shared_context(request: Request) -> dict[str, Any]:
         "current_user": user,
         "source_labels": _source_labels(request),
         "destination": user_preferences(user).directions_destination,
+        # A walk to a bus line up to this long is lit on the card
+        "bus_limit": user_criteria(user).bus_max_minutes,
     }
 
 
@@ -322,6 +327,8 @@ class Card:
     area_note: str | None = None
     # The signed-in user's own mark on the listing (none yet: seen, doesn't fit their search)
     mark: ListingMark | None = None
+    # The walk to each bus line the user wants near
+    bus: list[transit.LineWalk] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -336,7 +343,8 @@ class Card:
         return self.mark.notes if self.mark else None
 
 
-async def _cards(session: AsyncSession, listings: list[Listing], user_id: int) -> list[Card]:
+async def _cards(session: AsyncSession, listings: list[Listing], user: User) -> list[Card]:
+    lines = user_criteria(user).bus_lines
     ids = [listing.id for listing in listings]
     duplicates: defaultdict[int, list[Listing]] = defaultdict(list)
     drops: dict[int, int] = {}
@@ -364,19 +372,20 @@ async def _cards(session: AsyncSession, listings: list[Listing], user_id: int) -
             duplicates[listing.id],
             drops.get(listing.id),
             area_note(listing),
-            listing.marks.get(user_id),
+            listing.marks.get(user.id),
+            transit.walks_from(lines, listing, duplicates[listing.id]),
         )
         for listing in listings
     ]
 
 
 async def _page_of_cards(
-    session: AsyncSession, filters: ListingFilters, tab: str, offset: int, user_id: int
+    session: AsyncSession, filters: ListingFilters, tab: str, offset: int, user: User
 ) -> tuple[list[Card], int | None]:
-    query = _ordered(_listings_query(filters, tab, user_id), filters.sort)
+    query = _ordered(_listings_query(filters, tab, user.id), filters.sort)
     listings = list(await session.scalars(query.offset(offset).limit(PAGE_SIZE + 1)))
     next_offset = offset + PAGE_SIZE if len(listings) > PAGE_SIZE else None
-    return await _cards(session, listings[:PAGE_SIZE], user_id), next_offset
+    return await _cards(session, listings[:PAGE_SIZE], user), next_offset
 
 
 async def _count(session: AsyncSession, query: Select[Any]) -> int:
@@ -389,6 +398,10 @@ def _criteria_summary(criteria: SearchCriteria) -> str:
         parts.append(f"עד {criteria.price_max:,} ₪")
     if criteria.areas:
         parts.append(_areas_summary(criteria))
+    if criteria.bus_lines and criteria.bus_rule != "show":
+        numbers = ", ".join(line.number for line in criteria.bus_lines)
+        lines = f"קו {numbers}" if len(criteria.bus_lines) == 1 else f"קווים {numbers}"
+        parts.append(f"עד {criteria.bus_max_minutes} דק׳ הליכה ל{lines}")
     return " · ".join(parts)
 
 
@@ -426,7 +439,7 @@ async def listings_page(request: Request) -> HTMLResponse:
         cards, next_offset = (
             ([], None)
             if filters.view == "map"
-            else await _page_of_cards(session, filters, tab, 0, user_id)
+            else await _page_of_cards(session, filters, tab, 0, request.state.user)
         )
         # Listings whose ad text wasn't read yet: a search sees only their title and address
         without_text = 0
@@ -458,7 +471,7 @@ async def more_cards(request: Request, offset: int = 0) -> HTMLResponse:
     tab = filters.tab or "all"
     async with _sessionmaker(request)() as session:
         cards, next_offset = await _page_of_cards(
-            session, filters, tab, max(offset, 0), _user_id(request)
+            session, filters, tab, max(offset, 0), request.state.user
         )
     context = {
         "cards": cards,
@@ -580,7 +593,7 @@ async def set_listing_status(request: Request, listing_id: int) -> HTMLResponse:
         # Pressing the same button again undoes it
         found.status = ListingStatus.SEEN if found.status == wanted else wanted
         await session.commit()
-        [card] = await _cards(session, [listing], user_id)
+        [card] = await _cards(session, [listing], request.state.user)
     return render_partial(request, "partials/listing_card.html", {"card": card})
 
 
@@ -928,17 +941,30 @@ SAVED_MESSAGES = {
     "criteria": "החיפוש שלך נשמר. ההתאמה של המודעות לחיפוש שלך חושבה מחדש.",
     "preferences": "ההגדרות שלך נשמרו.",
     "schedule": "שעות הבדיקה נשמרו.",
+    "bus": "קווי האוטובוס נשמרו. מסלולי ההליכה מחושבים עכשיו; עד אז מוצגת הערכה (~).",
+    "bus_rule": "ההגדרה נשמרה. ההתאמה של המודעות לחיפוש שלך חושבה מחדש.",
 }
+FAILED_MESSAGES = {
+    "bus": "לא הצלחתי לקרוא את התחנות של הקו כרגע. אפשר לנסות שוב עוד מעט.",
+    "bus_limit": f"אפשר לבחור עד {MAX_BUS_LINES} קווים.",
+}
+BUS_RULES = [
+    ("any", "לפחות אחד מהקווים במרחק הליכה"),
+    ("all", "כל הקווים במרחק הליכה"),
+    ("show", "רק להציג את זמן ההליכה"),
+]
 
 
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
+async def settings_page(request: Request, saved: str = "", failed: str = "") -> HTMLResponse:
     user = request.state.user
     criteria = user_criteria(user)
     async with _sessionmaker(request)() as session:
         context = {
             "active": "settings",
             "saved": SAVED_MESSAGES.get(saved),
+            "failed": FAILED_MESSAGES.get(failed),
+            "bus_rules": BUS_RULES,
             "criteria": criteria,
             "areas_summary": _areas_summary(criteria),
             "has_area_map": areas.city_map(criteria.city) is not None,
@@ -983,6 +1009,10 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
                 parking_required=form.get("parking_required") == "1",
                 areas=current.areas if same_city else [],
                 unknown_area_ok=current.unknown_area_ok,
+                # The bus lines have their own forms
+                bus_lines=current.bus_lines,
+                bus_max_minutes=current.bus_max_minutes,
+                bus_rule=current.bus_rule,
                 exclude_keywords=[
                     line.strip()
                     for line in str(form.get("exclude_keywords", "")).splitlines()
@@ -995,6 +1025,108 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
         await rematch_user(session, me.id, criteria)
         await session.commit()
     return RedirectResponse("/settings?saved=criteria", status_code=303)
+
+
+# --- bus lines -----------------------------------------------------------------
+
+
+@router.get("/settings/bus-lines/search", response_class=HTMLResponse)
+async def search_bus_lines(request: Request, number: str = "") -> HTMLResponse:
+    """The lines that go by a number, for the user to pick theirs from."""
+    number = number.strip()[:8]
+    criteria = user_criteria(request.state.user)
+    context: dict[str, Any] = {
+        "number": number,
+        "candidates": [],
+        "error": None,
+        "chosen": {line.key for line in criteria.bus_lines},
+    }
+    if number:
+        try:
+            found = await transit.find_lines(number)
+        except transit.TransitError as exc:
+            log.warning("Looking up bus line %s failed: %s", number, exc)
+            context["error"] = "לא הצלחתי לקרוא את רשימת הקווים כרגע. אפשר לנסות שוב עוד מעט."
+        else:
+            # The same number runs in many towns; the user's own first
+            context["candidates"] = sorted(
+                found,
+                key=lambda line: (criteria.city not in line.description, line.agency, line.key),
+            )
+    return render_partial(request, "partials/bus_candidates.html", context)
+
+
+async def _work_out_walks(app: Any, user_id: int) -> None:
+    """After a user's bus lines changed: the walks from every listing to them, and then which
+    listings fit the user's search by those."""
+    sessionmaker = app.state.sessionmaker
+    async with sessionmaker() as session:
+        user = await session.get(User, user_id)
+        lines = user_criteria(user).bus_lines if user else []
+        targets = await walking.pending(session, lines)
+    routing_url = app.state.settings.routing_url
+    if not await walking.fill_walks(sessionmaker, targets, lines, routing_url):
+        return
+    async with sessionmaker() as session:
+        user = await session.get(User, user_id)
+        if user is not None:
+            await rematch_user(session, user.id, user_criteria(user))
+            await session.commit()
+
+
+async def _save_bus_criteria(request: Request, changes: dict[str, Any]) -> None:
+    async with _sessionmaker(request)() as session:
+        me = await _me(request, session)
+        try:
+            criteria = SearchCriteria.model_validate(user_criteria(me).model_dump() | changes)
+        except ValidationError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        set_user_criteria(me, criteria)
+        await rematch_user(session, me.id, criteria)
+        await session.commit()
+
+
+@router.post("/settings/bus-lines")
+async def save_bus_line(request: Request) -> RedirectResponse:
+    """Add a line with its stops, or read the stops of a chosen line again."""
+    key = str((await request.form()).get("key", ""))
+    if not transit.LINE_KEY.match(key):
+        raise HTTPException(400, "Unknown line")
+    lines = user_criteria(request.state.user).bus_lines
+    known = any(line.key == key for line in lines)
+    if not known and len(lines) >= MAX_BUS_LINES:
+        return RedirectResponse("/settings?failed=bus_limit#bus", status_code=303)
+    try:
+        fetched = await transit.fetch_line(key)
+    except transit.TransitError as exc:
+        log.warning("Reading the stops of bus line %s failed: %s", key, exc)
+        return RedirectResponse("/settings?failed=bus#bus", status_code=303)
+    lines = [fetched if line.key == key else line for line in lines]
+    await _save_bus_criteria(request, {"bus_lines": lines if known else [*lines, fetched]})
+    task = asyncio.create_task(_work_out_walks(request.app, _user_id(request)))
+    request.app.state.background_tasks.add(task)
+    task.add_done_callback(request.app.state.background_tasks.discard)
+    return RedirectResponse("/settings?saved=bus#bus", status_code=303)
+
+
+@router.post("/settings/bus-lines/{key}/delete")
+async def remove_bus_line(request: Request, key: str) -> RedirectResponse:
+    lines = user_criteria(request.state.user).bus_lines
+    await _save_bus_criteria(request, {"bus_lines": [line for line in lines if line.key != key]})
+    return RedirectResponse("/settings?saved=bus_rule#bus", status_code=303)
+
+
+@router.post("/settings/bus-rule")
+async def save_bus_rule(request: Request) -> RedirectResponse:
+    form = await request.form()
+    await _save_bus_criteria(
+        request,
+        {
+            "bus_rule": str(form.get("bus_rule", "")),
+            "bus_max_minutes": _optional_int(form.get("bus_max_minutes")),
+        },
+    )
+    return RedirectResponse("/settings?saved=bus_rule#bus", status_code=303)
 
 
 def _time(value: Any, default: time) -> time:

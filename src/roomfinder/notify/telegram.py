@@ -12,7 +12,7 @@ buttons and commands change that user's marks and settings only.
 import html
 import logging
 import secrets
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -39,6 +39,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from roomfinder import transit
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.labels import area_note, directions_url, furniture_label, parking_label
@@ -51,8 +52,8 @@ from roomfinder.models import (
     TelegramChat,
     User,
 )
-from roomfinder.schemas import PROPERTY_TYPE_LABELS, PropertyType
-from roomfinder.settings_store import set_user_preferences, user_preferences
+from roomfinder.schemas import PROPERTY_TYPE_LABELS, BusLine, PropertyType
+from roomfinder.settings_store import set_user_preferences, user_criteria, user_preferences
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def _escape(text: str) -> str:
     return html.escape(text, quote=False)
 
 
-def _listing_details(listing: Listing) -> list[str]:
+def _listing_details(listing: Listing, bus_lines: Sequence[BusLine] = ()) -> list[str]:
     e = _escape
     lines = []
     specs = [_rooms(listing.rooms), f"{listing.sqm} מ״ר" if listing.sqm else None]
@@ -140,6 +141,15 @@ def _listing_details(listing: Listing) -> list[str]:
         extras.append(f"🚗 {parking}")
     if extras:
         lines.append(" · ".join(extras))
+    # The walk to each bus line the user wants near; "~" until worked out on the streets
+    if walks := transit.walks_from(bus_lines, listing):
+        lines.append(
+            "🚌 "
+            + " · ".join(
+                f"קו {e(walk.line.number)}: {'~' if walk.estimated else ''}{walk.minutes} דק׳ הליכה"
+                for walk in walks
+            )
+        )
     features = listing.features
     if parking:  # already said above
         features = [feature for feature in features if feature != "חניה"]
@@ -148,17 +158,25 @@ def _listing_details(listing: Listing) -> list[str]:
     return lines
 
 
-def format_new_listing(listing: Listing, source_label: str) -> str:
+def format_new_listing(
+    listing: Listing, source_label: str, bus_lines: Sequence[BusLine] = ()
+) -> str:
     lines = [f"🏠 <b>דירה חדשה ב{_escape(source_label)}</b>", f"<b>{_price(listing.price)}</b>"]
-    return "\n".join(lines + _listing_details(listing))[:CAPTION_LIMIT]
+    return "\n".join(lines + _listing_details(listing, bus_lines))[:CAPTION_LIMIT]
 
 
-def format_price_drop(listing: Listing, source_label: str, old_price: int, new_price: int) -> str:
+def format_price_drop(
+    listing: Listing,
+    source_label: str,
+    old_price: int,
+    new_price: int,
+    bus_lines: Sequence[BusLine] = (),
+) -> str:
     lines = [
         f"📉 <b>ירידת מחיר ב{_escape(source_label)}</b>",
         f"<s>{old_price:,}</s> ← <b>{new_price:,} ₪</b>",
     ]
-    return "\n".join(lines + _listing_details(listing))[:CAPTION_LIMIT]
+    return "\n".join(lines + _listing_details(listing, bus_lines))[:CAPTION_LIMIT]
 
 
 def more_photos(listing: Listing) -> list[str]:
@@ -307,13 +325,15 @@ class TelegramService:
     # --- Notifier ------------------------------------------------------------
 
     async def new_listing(self, user_id: int, listing: Listing, *, silent: bool) -> None:
-        text = format_new_listing(listing, self._label(listing))
+        text = format_new_listing(listing, self._label(listing), await self._bus_lines(user_id))
         await self._send_listing(user_id, listing, text, "new", silent)
 
     async def price_drop(
         self, user_id: int, listing: Listing, old_price: int, new_price: int, *, silent: bool
     ) -> None:
-        text = format_price_drop(listing, self._label(listing), old_price, new_price)
+        text = format_price_drop(
+            listing, self._label(listing), old_price, new_price, await self._bus_lines(user_id)
+        )
         await self._send_listing(user_id, listing, text, "price_drop", silent)
 
     async def message(self, user_id: int, text: str, *, silent: bool = False) -> None:
@@ -327,6 +347,11 @@ class TelegramService:
                 disable_notification=silent,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
+
+    async def _bus_lines(self, user_id: int) -> list[BusLine]:
+        async with self.sessionmaker() as session:
+            account = await session.get(User, user_id)
+            return user_criteria(account).bus_lines if account else []
 
     def _label(self, listing: Listing) -> str:
         return self.source_labels.get(listing.source, listing.source)

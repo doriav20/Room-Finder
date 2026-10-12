@@ -7,6 +7,9 @@
 {% if saved %}
 <div class="alert alert-success">✔ {{ saved }}</div>
 {% endif %}
+{% if failed %}
+<div class="alert alert-warning">{{ failed }}</div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-7">
@@ -97,6 +100,57 @@
         <small class="text-body-secondary">האתרים נבדקים פעם אחת בשביל כולם, בחיפוש שמכסה את החיפושים של כל המשתמשים. כשהחיפוש שלך מרחיב אותו, מודעות שכבר מפורסמות בטווח החדש נשמרות בשקט ומגיעה הודעת סיכום אחת, כדי שלא תקבל הצפה של מודעות ישנות.</small>
       </div>
     </form>
+
+    <section class="card shadow-sm mt-4" id="bus">
+      <div class="card-header bg-body fw-semibold">🚌 קווי אוטובוס ליד הדירה</div>
+      <div class="card-body">
+        <p class="small text-body-secondary">
+          לכל מודעה מחושב כמה דקות הליכה יש ממנה לתחנה הקרובה של כל קו שנבחר כאן, במסלול הליכה ברחובות.
+          מודעה בלי נקודה על המפה לא נפסלת.
+        </p>
+        {% if criteria.bus_lines %}
+        <ul class="list-group mb-3">
+          {% for line in criteria.bus_lines %}
+          <li class="list-group-item d-flex align-items-center gap-2">
+            <div class="flex-grow-1">
+              <strong>קו {{ line.number }}</strong> · {{ line.agency }}
+              <div class="small text-body-secondary">{{ line.description }} · {{ line.stops | length }} תחנות</div>
+            </div>
+            <form method="post" action="/settings/bus-lines">
+              <input type="hidden" name="key" value="{{ line.key }}">
+              <button class="btn btn-sm btn-outline-secondary" title="קריאה מחדש של התחנות, למשל אחרי שמסלול הקו השתנה">רענן</button>
+            </form>
+            <form method="post" action="/settings/bus-lines/{{ line.key }}/delete">
+              <button class="btn btn-sm btn-outline-danger">הסר</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <form class="input-group" hx-get="/settings/bus-lines/search" hx-target="#bus-candidates" hx-disabled-elt="find button">
+          <input name="number" class="form-control" inputmode="numeric" maxlength="8" required placeholder="מספר קו, למשל 17" aria-label="מספר קו">
+          <button class="btn btn-outline-primary">חפש קו</button>
+        </form>
+        <div id="bus-candidates" class="mt-2"></div>
+      </div>
+      {% if criteria.bus_lines %}
+      <form class="card-footer bg-body" method="post" action="/settings/bus-rule">
+        <div class="row g-2 align-items-end">
+          <div class="col-sm-6">
+            <label class="form-label small mb-1" for="bus_rule">מה נחשב מתאים</label>
+            <select id="bus_rule" name="bus_rule" class="form-select">
+              {% for value, label in bus_rules %}<option value="{{ value }}"{% if criteria.bus_rule == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-8 col-sm-4">
+            <label class="form-label small mb-1" for="bus_max_minutes">עד כמה דקות הליכה</label>
+            <input id="bus_max_minutes" name="bus_max_minutes" type="number" min="1" max="60" required class="form-control" value="{{ criteria.bus_max_minutes }}">
+          </div>
+          <div class="col-4 col-sm-2"><button class="btn btn-primary w-100">שמור</button></div>
+        </div>
+      </form>
+      {% endif %}
+    </section>
   </div>
 
   <div class="col-lg-5 d-flex flex-column gap-4">

@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from roomfinder import areas
+from roomfinder import areas, transit
 from roomfinder.normalize import contains_phrase, normalize_city
 from roomfinder.schemas import SearchCriteria
 
@@ -71,6 +71,14 @@ def mismatch_reasons(listing: ListingLike, criteria: SearchCriteria) -> list[str
             area is not None and area not in criteria.areas
         ):
             reasons.append("area")
+
+    if criteria.bus_rule != "show" and criteria.bus_lines:
+        # A listing without a point on the map has no walks, and isn't ruled out. Neither is
+        # one whose walk is still an estimate, unless even the straight line is too long
+        walks = [transit.walk_to(line, listing) for line in criteria.bus_lines]
+        near = [walk.at_least <= criteria.bus_max_minutes for walk in walks if walk is not None]
+        if near and not (all(near) if criteria.bus_rule == "all" else any(near)):
+            reasons.append("bus")
 
     text = " ".join(filter(None, [listing.title, listing.description]))
     if any(contains_phrase(text, keyword) for keyword in criteria.exclude_keywords):

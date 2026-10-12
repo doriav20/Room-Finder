@@ -74,6 +74,26 @@ class ListingDetails(BaseModel):
     features: list[str] = Field(default_factory=list)
 
 
+class BusStop(BaseModel):
+    # The number on the stop's sign
+    code: str
+    name: str
+    lat: float
+    lon: float
+
+
+class BusLine(BaseModel):
+    """A bus line a user wants near the apartment, with every stop it has (see transit.py)."""
+
+    # "operator-catalog number", which is the same line in both directions
+    key: str
+    number: str
+    agency: str
+    description: str
+    stops: list[BusStop] = Field(default_factory=list)
+    fetched_at: datetime | None = None
+
+
 class SearchCriteria(BaseModel):
     """What the user is looking for; editable from the dashboard."""
 
@@ -98,6 +118,11 @@ class SearchCriteria(BaseModel):
     areas: list[str] = Field(default_factory=list)
     # Whether a listing that can't be placed in a neighborhood still fits
     unknown_area_ok: bool = True
+    # Bus lines to have within a walk of the apartment, and how long a walk is still near
+    bus_lines: list[BusLine] = Field(default_factory=list)
+    bus_max_minutes: int = Field(default=5, ge=1, le=60)
+    # "show" only shows the walks; "any" and "all" rule out listings far from the lines
+    bus_rule: Literal["show", "any", "all"] = "any"
     # Matched as whole words, so "שותף" would not hit "חצר משותפת"
     exclude_keywords: list[str] = Field(
         default_factory=lambda: ["סאבלט", "שותף לדירה", "שותפה לדירה"]

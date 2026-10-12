@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from roomfinder import transit, walking
 from roomfinder.config import Settings
 from roomfinder.db import utcnow
 from roomfinder.models import (
@@ -24,7 +25,14 @@ from roomfinder.models import (
     User,
 )
 from roomfinder.notify import Notifier
-from roomfinder.pipeline import IngestOutcome, apply_details, ingest, interested, mark_removed
+from roomfinder.pipeline import (
+    IngestOutcome,
+    apply_details,
+    ingest,
+    interested,
+    judge,
+    mark_removed,
+)
 from roomfinder.schemas import ListingData, SearchCriteria
 from roomfinder.searchers import FetchScope, Searcher, combined_searches, load_searchers
 from roomfinder.sources.base import BlockedError, FetchResult, Source, human_pause
@@ -35,6 +43,8 @@ log = logging.getLogger(__name__)
 FAILURE_ALERT_THRESHOLD = 3
 # Older listings whose pages are read per run, besides the new ones
 DETAILS_BACKFILL_PER_RUN = 4
+# Older listings whose walks to bus stops are worked out per run, besides the new ones
+WALKS_BACKFILL_PER_RUN = 200
 # An empty result from a source that had this many live listings means the site changed
 SUSPICIOUS_EMPTY_THRESHOLD = 5
 
@@ -162,6 +172,11 @@ class SourceRunner:
             return await self._fail(source, run_id, RunStatus.ERROR, f"{type(exc).__name__}: {exc}")
 
         outcome = stored.outcome
+        try:
+            await self._add_walks(source, run_id, outcome, searchers)
+        except Exception:
+            # The walks stay estimates, and are tried again in the next run
+            log.exception("%s: working out the walks to bus stops failed", source.name)
         log.info(
             "%s: found %d, new %d, price drops %d, removed %d%s",
             source.name, outcome.found, len(outcome.new), len(outcome.price_drops),
@@ -292,6 +307,41 @@ class SourceRunner:
                 apply_details(listing, details, searchers, utcnow())
                 await session.commit()
 
+        await self._settle_new(run_id, outcome)
+
+    async def _add_walks(
+        self, source: Source, run_id: int, outcome: IngestOutcome, searchers: list[Searcher]
+    ) -> None:
+        """Work out the walks from new listings (and some older ones) to the bus lines users want.
+
+        A walk on the streets can be longer than the distance suggests and rule a new listing
+        out, so this happens before notifying.
+        """
+        lines = transit.lines_of(searcher.criteria for searcher in searchers if searcher.active)
+        if not lines:
+            return
+        new_ids = [listing.id for listing in outcome.new]
+        async with self.sessionmaker() as session:
+            older = [
+                listing_id
+                for listing_id in await walking.pending(session, lines, source.name)
+                if listing_id not in new_ids
+            ]
+        targets = new_ids + older[:WALKS_BACKFILL_PER_RUN]
+        filled = await walking.fill_walks(
+            self.sessionmaker, targets, lines, self.settings.routing_url
+        )
+        if not filled:
+            return
+        async with self.sessionmaker() as session:
+            for listing_id in filled:
+                judge(await session.get(Listing, listing_id), searchers)
+            await session.commit()
+        await self._settle_new(run_id, outcome)
+
+    async def _settle_new(self, run_id: int, outcome: IngestOutcome) -> None:
+        """Take the new listings that turned out not to fit anyone off the news."""
+        new_ids = [listing.id for listing in outcome.new]
         if not new_ids:
             return
         async with self.sessionmaker() as session:
