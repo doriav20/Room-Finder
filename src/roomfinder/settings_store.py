@@ -16,13 +16,15 @@ SCHEDULE_KEY = "schedule"
 
 
 class Preferences(BaseModel):
-    """One user's notifications."""
+    """One user's notifications, and where their directions links lead."""
 
     notifications_paused: bool = False
     notify_price_drops: bool = True
     # Telegram messages arrive without sound during these hours
     quiet_hours_start: time = time(23, 0)
     quiet_hours_end: time = time(7, 0)
+    # The directions links of the listings lead here; empty leaves it to fill in on the map
+    directions_destination: str = ""
 
 
 class Schedule(BaseModel):

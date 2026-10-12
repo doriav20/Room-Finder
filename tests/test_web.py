@@ -259,6 +259,33 @@ def test_saving_preferences(client):
     assert "התראות מושהות" in page
 
 
+def test_directions_lead_to_the_saved_destination(client, db):
+    add_listing(db, "a", latitude=31.97, longitude=34.79)
+    origin, destination = quote_plus("הרצל 12, ראשון לציון"), quote_plus("רוטשילד 1, תל אביב")
+
+    response = client.post(
+        "/listings/destination",
+        data={"destination": "  רוטשילד 1,  תל אביב ", "query": "tab=all&price_max=7000"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?tab=all&price_max=7000"
+    page = client.get("/?tab=all").text
+    assert 'name="destination" class="form-control" value="רוטשילד 1, תל אביב"' in page
+    assert f'/maps/dir/?api=1&amp;origin={origin}&amp;destination={destination}"' in page
+    [point] = client.get("/api/listings/map?tab=all").json()["listings"]
+    assert point["directions"].endswith(f"&destination={destination}")
+    # The notifications form doesn't carry the destination, and keeps it
+    client.post("/settings/preferences", data={"notifications_paused": "1"})
+    assert db.get(User, 1).preferences["directions_destination"] == "רוטשילד 1, תל אביב"
+
+    cleared = client.post("/listings/destination", data={"destination": ""}, follow_redirects=False)
+
+    assert cleared.headers["location"] == "/"
+    assert f'origin={origin}"' in client.get("/?tab=all").text
+
+
 def test_telegram_actions_need_a_bot(client):
     assert "הבוט לא מוגדר" in client.get("/account").text
     assert client.post("/account/telegram/link").status_code == 503

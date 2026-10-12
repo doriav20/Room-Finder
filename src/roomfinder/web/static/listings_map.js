@@ -61,7 +61,7 @@
     const actions = make("div", "d-flex align-items-center justify-content-between gap-2 mt-2");
     actions.append(link);
     if (listing.directions) {
-      // Google Maps opens with the apartment as the start; the destination is typed there
+      // Google Maps opens with the apartment as the start, on the way to the user's destination
       const directions = make("a", "directions-link", "מסלול");
       directions.href = listing.directions;
       directions.target = "_blank";

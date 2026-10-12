@@ -35,8 +35,11 @@ def area_note(listing: Listing) -> str | None:
     return None if named is not None and named.name == listing.area else listing.area
 
 
-def directions_url(listing: Listing, copies: Iterable[Listing] = ()) -> str | None:
-    """Google Maps directions that start at the apartment, with the destination left to fill in.
+def directions_url(
+    listing: Listing, copies: Iterable[Listing] = (), destination: str = ""
+) -> str | None:
+    """Google Maps directions that start at the apartment and lead to the user's destination;
+    without one the destination is left to fill in there.
 
     A full address reads best there; without one the start is the listing's map point (its own
     or a copy's from another site), and failing that its street or neighborhood."""
@@ -57,4 +60,5 @@ def directions_url(listing: Listing, copies: Iterable[Listing] = ()) -> str | No
         origin = ", ".join(filter(None, [place, listing.city]))
     else:
         return None
-    return "https://www.google.com/maps/dir/?" + urlencode({"api": 1, "origin": origin})
+    query = {"api": 1, "origin": origin} | ({"destination": destination} if destination else {})
+    return "https://www.google.com/maps/dir/?" + urlencode(query)

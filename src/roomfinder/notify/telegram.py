@@ -166,13 +166,14 @@ def more_photos(listing: Listing) -> list[str]:
     return listing.images[1 : 1 + ALBUM_LIMIT]
 
 
-def listing_keyboard(listing: Listing, status: str) -> InlineKeyboardMarkup:
-    """The buttons under a listing, lit by the status the chat's user gave it."""
+def listing_keyboard(listing: Listing, status: str, destination: str = "") -> InlineKeyboardMarkup:
+    """The buttons under a listing, lit by the status the chat's user gave it. The directions
+    lead to that user's destination, when they set one."""
     favorite = status == ListingStatus.FAVORITE
     hidden = status == ListingStatus.HIDDEN
     top = [InlineKeyboardButton("🔗 למודעה", url=listing.url)]
-    # Google Maps opens with the apartment as the start; the destination is typed there
-    if directions := directions_url(listing):
+    # Google Maps opens with the apartment as the start
+    if directions := directions_url(listing, destination=destination):
         top.append(InlineKeyboardButton("🧭 מסלול מכאן", url=directions))
     rows = [top]
     # An album can't carry buttons, so the rest of the photos come on request
@@ -339,7 +340,8 @@ class TelegramService:
                     ListingMark.user_id == user_id, ListingMark.listing_id == listing.id
                 )
             )
-        keyboard = listing_keyboard(listing, status or ListingStatus.SEEN)
+            destination = await self._destination(session, user_id)
+        keyboard = listing_keyboard(listing, status or ListingStatus.SEEN, destination)
         for chat_id in await self.chat_ids_of(user_id):
             sent: Message | None = None
             if listing.images:
@@ -511,13 +513,20 @@ class TelegramService:
             # Pressing the same button again undoes it
             found.status = ListingStatus.SEEN if found.status == wanted else wanted
             status = found.status
+            destination = await self._destination(session, account_id)
             await session.commit()
         answers = {
             ListingStatus.FAVORITE: "⭐ נשמר במועדפים",
             ListingStatus.HIDDEN: "🙈 סומן כלא רלוונטי",
         }
         await query.answer(answers.get(ListingStatus(status), "בוטל"))
-        await query.edit_message_reply_markup(listing_keyboard(listing, status))
+        await query.edit_message_reply_markup(listing_keyboard(listing, status, destination))
+
+    @staticmethod
+    async def _destination(session: AsyncSession, account_id: int) -> str:
+        """Where the account's directions links lead, if they set a destination."""
+        account = await session.get(User, account_id)
+        return user_preferences(account).directions_destination if account else ""
 
     async def _send_more_photos(self, query: CallbackQuery, listing_id: int) -> None:
         """Send the rest of a listing's photos as a reply to its message."""

@@ -14,7 +14,7 @@ from datetime import time, timedelta
 from functools import cached_property
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -64,6 +64,7 @@ router = APIRouter(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 STATIC_DIR = Path(__file__).parent / "static"
 
+DESTINATION_LIMIT = 200
 PAGE_SIZE = 48
 # The map shows a tab's listings all at once, up to this many
 MAP_LIMIT = 1000
@@ -143,13 +144,22 @@ async def render_page(
         "telegram_configured": request.app.state.telegram is not None,
         "my_telegram": my_telegram,
     }
-    base = {"header": header, "current_user": user, "source_labels": _source_labels(request)}
+    base = {"header": header} | _shared_context(request)
     return templates.TemplateResponse(request, name, base | context)
 
 
 def render_partial(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse:
-    base = {"source_labels": _source_labels(request), "current_user": request.state.user}
-    return templates.TemplateResponse(request, name, base | context)
+    return templates.TemplateResponse(request, name, _shared_context(request) | context)
+
+
+def _shared_context(request: Request) -> dict[str, Any]:
+    """What a listing card needs, in a full page or on its own."""
+    user = request.state.user
+    return {
+        "current_user": user,
+        "source_labels": _source_labels(request),
+        "destination": user_preferences(user).directions_destination,
+    }
 
 
 def _source_labels(request: Request) -> dict[str, str]:
@@ -492,6 +502,7 @@ async def listings_map(request: Request) -> JSONResponse:
             ):
                 copies[copy.duplicate_of_id].append(copy)
     criteria = user_criteria(request.state.user)
+    destination = user_preferences(request.state.user).directions_destination
     points = []
     without_location = 0
     for listing in listings:
@@ -513,7 +524,7 @@ async def listings_map(request: Request) -> JSONResponse:
                 "area": listing.area,
                 "image": listing.images[0] if listing.images else None,
                 "url": listing.url,
-                "directions": directions_url(listing, copies[listing.id]),
+                "directions": directions_url(listing, copies[listing.id], destination),
                 "status": _status_of(listing, user_id),
                 "source": labels.get(listing.source, listing.source),
             }
@@ -537,6 +548,22 @@ async def listings_map(request: Request) -> JSONResponse:
             "bounds": bounds,
         }
     )
+
+
+@router.post("/listings/destination")
+async def save_directions_destination(request: Request) -> RedirectResponse:
+    """Where the directions links lead; an empty one leaves the destination to fill in there."""
+    form = await request.form()
+    destination = " ".join(str(form.get("destination", "")).split())[:DESTINATION_LIMIT]
+    async with _sessionmaker(request)() as session:
+        user = await _me(request, session)
+        preferences = user_preferences(user)
+        preferences.directions_destination = destination
+        set_user_preferences(user, preferences)
+        await session.commit()
+    # Back to the same tab and filters; parsed and built again, so it can only be this page
+    query = urlencode(parse_qsl(str(form.get("query", ""))))
+    return RedirectResponse(f"/?{query}" if query else "/", status_code=303)
 
 
 @router.post("/listings/{listing_id}/status", response_class=HTMLResponse)
@@ -981,14 +1008,16 @@ def _time(value: Any, default: time) -> time:
 async def save_notification_preferences(request: Request) -> RedirectResponse:
     form = await request.form()
     defaults = Preferences()
-    preferences = Preferences(
-        notifications_paused=form.get("notifications_paused") == "1",
-        notify_price_drops=form.get("notify_price_drops") == "1",
-        quiet_hours_start=_time(form.get("quiet_hours_start"), defaults.quiet_hours_start),
-        quiet_hours_end=_time(form.get("quiet_hours_end"), defaults.quiet_hours_end),
-    )
+    changes = {
+        "notifications_paused": form.get("notifications_paused") == "1",
+        "notify_price_drops": form.get("notify_price_drops") == "1",
+        "quiet_hours_start": _time(form.get("quiet_hours_start"), defaults.quiet_hours_start),
+        "quiet_hours_end": _time(form.get("quiet_hours_end"), defaults.quiet_hours_end),
+    }
     async with _sessionmaker(request)() as session:
-        set_user_preferences(await _me(request, session), preferences)
+        user = await _me(request, session)
+        # The rest of the preferences (the directions destination) aren't on this form
+        set_user_preferences(user, user_preferences(user).model_copy(update=changes))
         await session.commit()
     return RedirectResponse("/settings?saved=preferences", status_code=303)
 

@@ -127,6 +127,14 @@
     </div>
   </div>
 </form>
+{# Where the "מסלול" button of every listing leads; kept on the user's account #}
+<form class="input-group input-group-sm mt-2 directions-destination" method="post" action="/listings/destination">
+  <input type="hidden" name="query" value="{{ page_query }}">
+  <label class="input-group-text" for="directions-destination" title="כפתור המסלול בכל מודעה פותח את גוגל מפות עם מסלול מהדירה ליעד הזה">🧭 מסלול אל</label>
+  <input id="directions-destination" name="destination" class="form-control" value="{{ destination }}" maxlength="200"
+         autocomplete="off" enterkeyhint="done" placeholder="יעד קבוע, למשל: רוטשילד 1, תל אביב">
+  <button class="btn btn-outline-primary">שמור</button>
+</form>
 </div>
 
 {# On a phone the filters are folded away; what's set shows here, each removable with a tap #}

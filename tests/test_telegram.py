@@ -219,6 +219,8 @@ def test_keyboard_links_to_directions_from_the_apartment():
     }
     assert directions.url.startswith("https://www.google.com/maps/dir/?")
     assert parse_qs(urlsplit(from_point.url).query)["origin"] == ["31.97,34.79"]
+    [_, to_work] = listing_keyboard(listing, "new", "רוטשילד 1, תל אביב").inline_keyboard[0]
+    assert parse_qs(urlsplit(to_work.url).query)["destination"] == ["רוטשילד 1, תל אביב"]
     assert len(listing_keyboard(nowhere, "new").inline_keyboard[0]) == 1
 
 

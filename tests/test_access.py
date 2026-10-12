@@ -32,6 +32,7 @@ ACTIONS = [
     "/listings/1/status",
     "/listings/1/notes",
     "/listings/mark-seen",
+    "/listings/destination",
     "/sources/yad2/run",
     "/sources/yad2/toggle",
     "/sources/yad2/settings",
