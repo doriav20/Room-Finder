@@ -114,6 +114,27 @@ async def test_a_line_has_the_stops_of_both_directions_once(stride):
     assert line.fetched_at is not None
 
 
+async def test_a_day_whose_rides_have_no_stops_yet_is_passed_over(stride, monkeypatch):
+    # In the morning the day's routes and rides are out, but not yet where the rides stop
+    day_of_routes: list[str] = []
+    real_get = transit._get
+
+    async def get(client, path, **params):
+        rows = await real_get(client, path, **params)
+        if path == "/gtfs_routes/list" and rows:
+            day_of_routes.append(params["date_from"])
+        if path == "/gtfs_ride_stops/list" and len(day_of_routes) == 1:
+            return []
+        return rows
+
+    monkeypatch.setattr(transit, "_get", get)
+
+    line = await transit.fetch_line("25-27017")
+
+    assert len(line.stops) == 3
+    assert len(day_of_routes) == 2 and day_of_routes[0] > day_of_routes[1]
+
+
 async def test_unknown_lines_and_a_service_that_is_down_are_errors(stride):
     with pytest.raises(transit.TransitError):
         await transit.fetch_line("25-99999")

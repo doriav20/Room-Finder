@@ -11,7 +11,7 @@ distance.
 
 import math
 import re
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Protocol
@@ -84,8 +84,8 @@ async def _get(client: httpx.AsyncClient, path: str, **params: Any) -> list[dict
     return rows
 
 
-async def _routes(client: httpx.AsyncClient, **filters: Any) -> list[dict[str, Any]]:
-    """The routes of the latest day that has any."""
+async def _routes(client: httpx.AsyncClient, **filters: Any) -> AsyncIterator[list[dict[str, Any]]]:
+    """The routes of each of the last days that has any, from today back."""
     today = utcnow().date()
     for back in range(ROUTE_DAYS_BACK):
         day = (today - timedelta(days=back)).isoformat()
@@ -93,8 +93,27 @@ async def _routes(client: httpx.AsyncClient, **filters: Any) -> list[dict[str, A
             client, "/gtfs_routes/list", date_from=day, date_to=day, limit=1000, **filters
         )
         if rows:
-            return rows
-    return []
+            yield rows
+
+
+async def _stops(client: httpx.AsyncClient, routes: list[dict[str, Any]]) -> dict[str, BusStop]:
+    """The stops of these routes, as one ride of each route stops at them."""
+    stops: dict[str, BusStop] = {}
+    for route in routes:
+        rides = await _get(client, "/gtfs_rides/list", gtfs_route_id=route["id"], limit=1)
+        if not rides:
+            continue
+        for row in await _get(
+            client, "/gtfs_ride_stops/list", gtfs_ride_ids=rides[0]["id"], limit=1000
+        ):
+            lat, lon = row.get("gtfs_stop__lat"), row.get("gtfs_stop__lon")
+            if lat is None or lon is None or row.get("gtfs_stop__code") is None:
+                continue
+            code = str(row["gtfs_stop__code"])
+            stops[code] = BusStop(
+                code=code, name=row.get("gtfs_stop__name") or "", lat=lat, lon=lon
+            )
+    return stops
 
 
 def _key(route: dict[str, Any]) -> str:
@@ -121,7 +140,7 @@ def _by_line(routes: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
 async def find_lines(number: str) -> list[LineCandidate]:
     """The lines with this number, anywhere in the country."""
     async with new_client() as http:
-        routes = await _routes(http, route_short_name=number)
+        routes = await anext(_routes(http, route_short_name=number), [])
     return [
         LineCandidate(key, number, group[0]["agency_name"] or "", _description(group))
         for key, group in _by_line(
@@ -131,30 +150,23 @@ async def find_lines(number: str) -> list[LineCandidate]:
 
 
 async def fetch_line(key: str) -> BusLine:
-    """A line with the stops of all its routes, as one ride of each route stops at them."""
+    """A line with the stops of all its routes."""
     found = LINE_KEY.match(key)
     if found is None:
         raise TransitError("Unknown line")
     operator, catalog = found.groups()
+    routes: list[dict[str, Any]] | None = None
+    stops: dict[str, BusStop] = {}
     async with new_client() as http:
-        routes = _by_line(await _routes(http, operator_refs=operator, route_mkt=catalog)).get(key)
-        if not routes:
-            raise TransitError("The line wasn't found")
-        stops: dict[str, BusStop] = {}
-        for route in routes:
-            rides = await _get(http, "/gtfs_rides/list", gtfs_route_id=route["id"], limit=1)
-            if not rides:
-                continue
-            for row in await _get(
-                http, "/gtfs_ride_stops/list", gtfs_ride_ids=rides[0]["id"], limit=1000
-            ):
-                lat, lon = row.get("gtfs_stop__lat"), row.get("gtfs_stop__lon")
-                if lat is None or lon is None or row.get("gtfs_stop__code") is None:
-                    continue
-                code = str(row["gtfs_stop__code"])
-                stops[code] = BusStop(
-                    code=code, name=row.get("gtfs_stop__name") or "", lat=lat, lon=lon
-                )
+        # The routes and rides of a day are out before the stops of its rides (for hours, in
+        # the morning), so a day whose rides have no stops yet is passed over
+        async for day in _routes(http, operator_refs=operator, route_mkt=catalog):
+            routes = _by_line(day).get(key)
+            stops = await _stops(http, routes) if routes else {}
+            if stops:
+                break
+    if not routes:
+        raise TransitError("The line wasn't found")
     if not stops:
         raise TransitError("The line has no stops")
     return BusLine(
