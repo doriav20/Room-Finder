@@ -66,7 +66,7 @@ services:
   # The dashboard on your own domain through a Cloudflare Tunnel (see HOSTING.md). It connects
   # out to Cloudflare, so no router port is opened. Runs only with COMPOSE_PROFILES=tunnel in .env
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.3
     container_name: roomfinder-tunnel
     command: tunnel --no-autoupdate run
     environment:
