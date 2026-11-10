@@ -19,7 +19,7 @@
       {% if card.status == 'new' %}<span class="badge text-bg-success">חדש</span>{% endif %}
       {% if card.price_drop %}<span class="badge text-bg-danger">📉 ירד מ-{{ card.price_drop | price }}</span>{% endif %}
       {% if l.removed_at %}<span class="badge text-bg-secondary">הוסרה</span>{% endif %}
-      {% if not card.matches %}<span class="badge text-bg-warning">לא מתאימה לחיפוש שלך</span>{% endif %}
+      {% if not card.matches and search_scope != 'none' %}<span class="badge text-bg-warning">{{ 'לא מתאימה לאף חיפוש' if search_scope == 'everyone' else 'לא מתאימה לחיפוש שלך' }}</span>{% endif %}
     </div>
   </div>
   <div class="card-body">

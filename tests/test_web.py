@@ -99,6 +99,24 @@ def test_csv_export(client, db):
     assert ",מרוהטת,2 חניות," in response.text
 
 
+def test_offline_copy_of_a_tab(client, db):
+    add_listing(db, "a", notes="להתקשר בערב", description="מרפסת <גדולה>", price=5100)
+    add_listing(db, "b", street="ביאליק", price=7200)
+    add_listing(db, "c", street="הגפן", price=5300, matches=False)
+
+    response = client.get("/export.html?tab=all&price_max=6000")
+
+    assert response.headers["content-type"].startswith("text/html")
+    assert 'attachment; filename="roomfinder-' in response.headers["content-disposition"]
+    page = response.text
+    assert "5,100 ₪" in page and "להתקשר בערב" in page
+    assert "7,200 ₪" not in page  # over the price filter
+    assert "5,300 ₪" not in page  # doesn't fit the search
+    assert "מרפסת &lt;גדולה&gt;" in page
+    # Everything it needs is in the file
+    assert "/static/" not in page and "<link" not in page
+
+
 def test_csv_export_neutralizes_formulas_from_ads(client, db):
     add_listing(db, "a", description='=HYPERLINK("http://evil.example","לחץ")', notes="+1")
 
@@ -550,6 +568,44 @@ def test_the_combined_search_covers_every_active_user(client, db, member):
 
     assert "ראשון לציון · 4-5.5 חדרים · כל המחירים" in page
     assert "2 פעילים" in page
+
+
+def test_an_admin_can_see_what_everyone_else_is_shown(client, db, member):
+    theirs = add_listing(db, "theirs", price=5100, rooms=5.0)
+    add_listing(db, "nobodys", price=5200, rooms=4.0, street="ביאליק")
+    mine = add_listing(db, "mine", price=5300, rooms=3.0, street="הגפן")
+    city = "ראשון לציון"
+    client.post("/settings/criteria", data={"city": city, "rooms_min": "3", "rooms_max": "3"})
+    sign_in(client, "noa", PASSWORD)
+    client.post("/settings/criteria", data={"city": city, "rooms_min": "5", "rooms_max": "5"})
+    sign_in(client, "admin", PASSWORD)
+
+    saved = client.post("/settings/search-scope", data={"search_scope": "everyone"})
+
+    assert "המודעות שמוצגות לך חושבו מחדש" in saved.text
+    page = client.get("/?tab=all").text
+    assert "החיפושים של כל המשתמשים" in page
+    assert "5,100 ₪" in page
+    assert "5,200 ₪" not in page and "5,300 ₪" not in page  # the admin's own search is off
+    assert (mark_of(db, theirs, 1).matches, mark_of(db, mine, 1).matches) == (True, False)
+    # The member's search changing changes what the admin sees
+    sign_in(client, "noa", PASSWORD)
+    client.post("/settings/criteria", data={"city": city, "rooms_min": "4", "rooms_max": "4"})
+    assert mark_of(db, theirs, 1).matches is False
+    sign_in(client, "admin", PASSWORD)
+    # Nothing at all; and the admin's search no longer widens what the sites are read with
+    client.post("/settings/search-scope", data={"search_scope": "none"})
+    assert client.get("/?tab=all").text.count("listing-card h-100") == 0
+    assert "בלי חיפוש" in client.get("/").text
+    assert "1 פעילים" in client.get("/sources").text
+
+
+def test_only_admins_choose_whose_searches_they_see(client, db, member):
+    assert client.post("/settings/search-scope", data={"search_scope": "maybe"}).status_code == 400
+    sign_in(client, "noa", PASSWORD)
+
+    assert "/settings/search-scope" not in client.get("/settings").text
+    assert client.post("/settings/search-scope", data={"search_scope": "none"}).status_code == 403
 
 
 def test_only_admins_set_the_night_hours(client, db, member):

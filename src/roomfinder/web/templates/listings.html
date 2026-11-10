@@ -7,6 +7,8 @@
   <a class="text-body-secondary criteria-summary text-decoration-none" href="/settings" title="החיפוש שלי">{{ criteria_summary }}</a>
   <div class="d-flex flex-wrap justify-content-end gap-2 ms-auto">
     <button id="enable-notifications" class="btn btn-sm btn-outline-secondary" hidden>🔔 הפעל התראות בדפדפן</button>
+    <a class="btn btn-sm btn-outline-secondary" href="/export.html?{{ page_query }}" download
+       title="קובץ אחד עם המודעות שבלשונית, לפי הסינון והמיון, שנפתח גם בלי אינטרנט">⬇ שמירה לאופליין</a>
     <div class="btn-group btn-group-sm" role="group" aria-label="תצוגה">
       <a class="btn {% if filters.view == 'map' %}btn-outline-secondary{% else %}btn-secondary{% endif %}" href="?{{ view_query('') }}"{% if filters.view != 'map' %} aria-current="page"{% endif %}>📋 רשימה</a>
       <a class="btn {% if filters.view == 'map' %}btn-secondary{% else %}btn-outline-secondary{% endif %}" href="?{{ view_query('map') }}"{% if filters.view == 'map' %} aria-current="page"{% endif %}>🗺 מפה</a>

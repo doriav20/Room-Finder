@@ -14,8 +14,8 @@ from roomfinder.auth import SESSION_COOKIE, AuthError
 from roomfinder.db import utcnow
 from roomfinder.models import Invite, InviteKind, Role, TelegramChat, User, UserSession
 from roomfinder.notify.telegram import PAIRING_TTL
-from roomfinder.pipeline import rematch_user
-from roomfinder.settings_store import user_criteria
+from roomfinder.pipeline import rematch, rematch_user
+from roomfinder.searchers import load_searchers
 from roomfinder.web.routes import render_page, render_partial, templates
 from roomfinder.web.security import (
     clear_session_cookie,
@@ -144,7 +144,7 @@ async def register(request: Request) -> Response:
             context |= {"username": username, "error": str(exc)}
             return _auth_page(request, "register.html", context, 400)
         # The new user starts with the default search, until they set their own
-        await rematch_user(session, user.id, user_criteria(user))
+        await rematch_user(session, user.id)
         session_token = await auth.start_session(session, user, request.headers.get("user-agent"))
         await session.commit()
     return _signed_in(request, "/", session_token)
@@ -381,6 +381,9 @@ async def _change_user(request: Request, user_id: int, change) -> RedirectRespon
                 notice = await change(session, user)
             except AuthError:
                 raise _Refused("last_admin") from None
+            # Turned on or off, a user's search joins or leaves what the admins who follow
+            # everyone's searches see; and an admin made a member searches with their own
+            await rematch(session, await load_searchers(session), {user.id})
             await session.commit()
     except _Refused as refused:
         return RedirectResponse(f"/users?notice={refused.notice}", status_code=303)

@@ -1,0 +1,147 @@
+{#- A downloaded copy of a tab's listings, opened from a file: everything it needs is in it -#}
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomFinder · {{ tab_label }} · {{ made_at }}</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7; --card: #fff; --text: #1d2125; --muted: #646b73; --line: #dde1e6;
+  --chip: #eef0f3; --yes: #d7f2e1; --no: #f8dcdc; --accent: #0d6efd; --mark: #fff1a8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --card: #212429; --text: #e6e8eb; --muted: #9aa1a9; --line: #353a41;
+    --chip: #2d3137; --yes: #1f4a32; --no: #5a2a2a; --accent: #6ea8fe; --mark: #6b5a12;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Segoe UI", Arial, sans-serif; }
+header { padding: 16px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+.muted { color: var(--muted); font-size: .875rem; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tools input, .tools select { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+.tools input { flex: 1 1 220px; min-width: 0; }
+main { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 0 16px 24px; max-width: 1200px; margin: 0 auto; }
+article { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+article.removed { opacity: .7; }
+.photo { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; background: var(--chip); }
+.body { padding: 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.price { font-size: 1.25rem; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: .8rem; }
+.chip.yes { background: var(--yes); } .chip.no { background: var(--no); }
+.badge { font-weight: 600; }
+.notes { background: var(--mark); border-radius: 8px; padding: 4px 8px; white-space: pre-wrap; }
+details summary { cursor: pointer; color: var(--muted); font-size: .875rem; }
+details p { margin: 4px 0 0; white-space: pre-wrap; font-size: .9rem; }
+mark { background: var(--mark); color: inherit; }
+.links { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line); font-size: .9rem; }
+a { color: var(--accent); }
+.empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 40px 0; }
+</style>
+</head>
+<body>
+{%- set status_labels = {'new': '🆕 חדשה', 'favorite': '⭐ מועדף', 'contacted': '📞 פניתי', 'hidden': '🙈 לא רלוונטי'} %}
+<header>
+  <h1>🏠 RoomFinder · {{ tab_label }}</h1>
+  <div class="muted">
+    נשמר ב-{{ made_at }} · {{ summary }}
+    {%- if filters.q %} · חיפוש: "{{ filters.q }}"{% endif %}
+    {%- if filters.sources %} · {% for name in filters.sources %}{{ source_labels.get(name, name) }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    {%- if filters.area %} · {{ filters.area }}{% endif %}
+    {%- if filters.price_max %} · עד {{ filters.price_max | price }}{% endif %}
+    {%- if filters.furnished %} · {{ 'מרוהטת' if filters.furnished == 'yes' else 'לא מרוהטת' }}{% endif %}
+    {%- if filters.parking %} · {{ 'עם חניה' if filters.parking == 'yes' else 'בלי חניה' }}{% endif %}
+    {%- if filters.all %} · גם מודעות שלא מתאימות{% endif %}
+  </div>
+  <div class="muted"><span id="shown">{{ cards | length }}</span> מתוך {{ cards | length }} מודעות{% if cut_off %} (רק הראשונות; צמצמו את הסינון כדי לשמור את כולן){% endif %}. הקובץ נפתח גם בלי אינטרנט; התמונות והקישורים צריכים חיבור.</div>
+  <div class="tools">
+    <input id="filter" type="search" placeholder="סינון לפי מילים, למשל: מרפסת חניה" aria-label="סינון">
+    <select id="sort" aria-label="מיון">
+      <option value="">כמו בדשבורד</option>
+      <option value="price_asc">מחיר: מהזול</option>
+      <option value="price_desc">מחיר: מהיקר</option>
+    </select>
+  </div>
+</header>
+<main id="list">
+{%- for card in cards %}
+{%- set l = card.listing %}
+<article data-price="{{ l.price or '' }}" data-order="{{ loop.index }}"{% if l.removed_at %} class="removed"{% endif %}>
+  {% if l.images %}<img class="photo" src="{{ l.images[0] }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">{% endif %}
+  <div class="body">
+    <div class="top">
+      <span class="price">{{ l.price | price }}</span>
+      <span class="muted">{{ l.first_seen_at | local_datetime }}</span>
+    </div>
+    <div><strong>{{ l.rooms | rooms }} חדרים{% if l.sqm %} · {{ l.sqm }} מ״ר{% endif %}{% if l.floor is not none %} · {{ l.floor | floor }}{% endif %}</strong></div>
+    <div>📍 {{ card.address | highlight(search) or 'כתובת לא צוינה' }}{% if l.area %} <span class="muted">({{ card.area_note or l.area }})</span>{% endif %}</div>
+    <div class="chips">
+      <span class="chip badge">{{ source_labels.get(l.source, l.source) }}</span>
+      {% if card.status in status_labels %}<span class="chip badge">{{ status_labels[card.status] }}</span>{% endif %}
+      {% if card.price_drop %}<span class="chip no">📉 ירד מ-{{ card.price_drop | price }}</span>{% endif %}
+      {% if l.removed_at %}<span class="chip">הוסרה {{ l.removed_at | local_datetime }}</span>{% endif %}
+      {% if l.is_agency is true %}<span class="chip">תיווך</span>{% elif l.is_agency is false %}<span class="chip yes">פרטי</span>{% endif %}
+      {% if l.property_type %}<span class="chip">{{ l.property_type | property_label }}</span>{% endif %}
+      {% set furniture = l | furniture_label %}{% set parking = l | parking_label %}
+      {% if furniture %}<span class="chip {{ 'yes' if l.furnished else 'no' }}">🛋 {{ furniture }}</span>{% endif %}
+      {% if parking %}<span class="chip {{ 'yes' if l.parking else 'no' }}">🚗 {{ parking }}</span>{% endif %}
+      {% for feature in l.features if not (parking and feature == 'חניה') %}<span class="chip">{{ feature }}</span>{% endfor %}
+      {% for walk in card.bus %}<span class="chip{% if walk.minutes <= bus_limit %} yes{% endif %}">🚌 {{ walk.line.number }} · {% if walk.estimated %}~{% endif %}{{ walk.minutes }} דק׳</span>{% endfor %}
+    </div>
+    {% if card.notes %}<div class="notes">📝 {{ card.notes }}</div>{% endif %}
+    {% if l.description or l.furniture_details %}
+    <details{% if search and search.found_in((l.description or '') ~ ' ' ~ (l.furniture_details or '')) %} open{% endif %}>
+      <summary>תיאור המודעה</summary>
+      {% if l.description %}<p>{{ l.description | highlight(search) }}</p>{% endif %}
+      {% if l.furniture_details %}<p><strong>ריהוט:</strong> {{ l.furniture_details | highlight(search) }}</p>{% endif %}
+    </details>
+    {% endif %}
+    <div class="links">
+      <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">למודעה ↗</a>
+      {% for dup in card.duplicates %}<a href="{{ dup.url }}" target="_blank" rel="noopener noreferrer">{{ source_labels.get(dup.source, dup.source) }} ↗</a>{% endfor %}
+      {% set directions = l | directions_url(card.duplicates, destination) %}
+      {% if directions %}<a href="{{ directions }}" target="_blank" rel="noopener noreferrer">🧭 מסלול</a>{% endif %}
+    </div>
+  </div>
+</article>
+{%- else %}
+<div class="empty">אין מודעות בלשונית הזו.</div>
+{%- endfor %}
+</main>
+<script>
+(() => {
+  const list = document.getElementById("list");
+  const items = [...list.querySelectorAll("article")];
+  const shown = document.getElementById("shown");
+  const filter = document.getElementById("filter");
+  const sort = document.getElementById("sort");
+  const texts = new Map(items.map((item) => [item, item.textContent.toLowerCase()]));
+  filter.addEventListener("input", () => {
+    const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let count = 0;
+    for (const item of items) {
+      const fits = words.every((word) => texts.get(item).includes(word));
+      item.hidden = !fits;
+      count += fits;
+    }
+    shown.textContent = count;
+  });
+  sort.addEventListener("change", () => {
+    // Listings without a price go last either way
+    const price = (item, missing) => (item.dataset.price ? Number(item.dataset.price) : missing);
+    const by = {
+      price_asc: (a, b) => price(a, Infinity) - price(b, Infinity),
+      price_desc: (a, b) => price(b, -Infinity) - price(a, -Infinity),
+    }[sort.value] || ((a, b) => a.dataset.order - b.dataset.order);
+    list.append(...[...items].sort((a, b) => by(a, b) || a.dataset.order - b.dataset.order));
+  });
+})();
+</script>
+</body>
+</html>

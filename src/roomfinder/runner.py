@@ -71,12 +71,13 @@ class RunReport:
 
 
 def fetch_plan(searchers: Sequence[Searcher], custom_url: str | None) -> list[SearchCriteria]:
-    """The searches to read a source with: the active users' searches combined, one per city.
+    """The searches to read a source with: the active users' searches combined, one per city
+    (an admin who follows everyone's searches, or none, has no search of their own here).
 
     A custom URL replaces them and is read once. The source still gets a search with it,
     which some use for the parameters of the site's own API.
     """
-    searches = combined_searches(searcher.criteria for searcher in searchers if searcher.active)
+    searches = combined_searches(searcher.criteria for searcher in searchers if searcher.searching)
     if custom_url:
         return searches[:1] or [SearchCriteria()]
     return searches

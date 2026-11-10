@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -9,10 +10,11 @@ from roomfinder.pipeline import (
     apply_details,
     ingest,
     interested,
+    judge,
     mark,
     mark_removed,
     refresh_listings,
-    rematch_user,
+    rematch,
 )
 from roomfinder.schemas import ListingData, ListingDetails, PropertyType, SearchCriteria
 from roomfinder.searchers import FetchScope, Searcher, combined_searches
@@ -365,11 +367,55 @@ async def test_listings_outside_the_chosen_neighborhoods_are_not_notified(sessio
 async def test_a_changed_search_judges_every_stored_listing_again(session):
     await store(session, [item("a1", rooms=4), item("a2", rooms=5, street="ביאליק")], first=True)
 
-    fitting = await rematch_user(session, ME, SearchCriteria(rooms_min=5, rooms_max=5))
+    await rematch(session, searchers(SearchCriteria(rooms_min=5, rooms_max=5)), {ME})
 
-    assert fitting == 1
     assert (await get_listing(session, "a1")).marks[ME].matches is False
     assert (await get_listing(session, "a2")).marks[ME].matches is True
+
+
+def admin(user_id: int, scope: str, criteria: SearchCriteria = CRITERIA) -> Searcher:
+    return Searcher(user_id, True, True, criteria, Preferences(search_scope=scope))
+
+
+def test_an_admin_can_follow_everyone_elses_searches():
+    four, five = searchers(SearchCriteria(), SearchCriteria(rooms_min=5, rooms_max=5))
+    away = replace(five, user_id=3, active=False, criteria=SearchCriteria(rooms_min=3))
+    watcher = admin(9, "everyone", SearchCriteria(rooms_min=6, rooms_max=6))
+    fitting = {}
+    for rooms in (3.0, 4.0, 5.0, 6.0):
+        listing = Listing(source="yad2", source_id=str(rooms), rooms=rooms, images=[])
+        judge(listing, [four, five, away, watcher])
+        fitting[rooms] = listing.marks[9].matches
+
+    # Inactive users' searches and the admin's own are left out
+    assert fitting == {3.0: False, 4.0: True, 5.0: True, 6.0: False}
+
+
+def test_an_admin_can_turn_their_search_off():
+    listing = Listing(source="yad2", source_id="a1", rooms=4.0, images=[])
+
+    judge(listing, [admin(1, "none"), *searchers(CRITERIA, CRITERIA)[1:]])
+
+    assert listing.marks[1].matches is False
+    assert listing.marks[2].matches is True
+
+
+def test_members_always_search_with_their_own_search():
+    member = Searcher(1, True, False, CRITERIA, Preferences(search_scope="none"))
+    listing = Listing(source="yad2", source_id="a1", rooms=4.0, images=[])
+
+    judge(listing, [member])
+
+    assert listing.marks[1].matches is True
+
+
+async def test_another_users_new_search_is_judged_again_for_admins_who_follow_everyone(session):
+    await store(session, [item("a1", rooms=5)], first=True)
+    widened = replace(searchers(SearchCriteria(rooms_min=4, rooms_max=5))[0], user_id=2)
+
+    await rematch(session, [admin(ME, "everyone"), widened], {2})
+
+    assert (await get_listing(session, "a1")).marks[ME].matches is True
 
 
 async def test_refresh_places_stored_listings_and_judges_them_again(session):

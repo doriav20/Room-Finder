@@ -1,7 +1,7 @@
 """Stores the listings a source returned and works out which users should hear about them."""
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -13,8 +13,8 @@ from roomfinder.dedupe import find_duplicate
 from roomfinder.matching import listing_matches
 from roomfinder.models import Listing, ListingMark, ListingStatus, PriceChange
 from roomfinder.normalize import address_key, furniture_from_text, parking_from_text
-from roomfinder.schemas import ListingData, ListingDetails, SearchCriteria
-from roomfinder.searchers import FetchScope, Searcher, in_earlier_reach
+from roomfinder.schemas import ListingData, ListingDetails
+from roomfinder.searchers import FetchScope, Searcher, in_earlier_reach, load_searchers
 
 # A listing that disappeared from a healthy source for this long is considered taken down
 REMOVAL_GRACE = timedelta(hours=48)
@@ -50,10 +50,32 @@ def mark(listing: Listing, user_id: int) -> ListingMark:
     return found
 
 
-def judge(listing: Listing, searchers: Sequence[Searcher]) -> None:
-    """Note on each user's mark whether the listing fits their search."""
+def judge(
+    listing: Listing, searchers: Sequence[Searcher], only: Collection[int] | None = None
+) -> None:
+    """Note on each user's mark whether the listing fits their search.
+
+    An admin who follows everyone's searches gets what fits any active user's own search,
+    and one who turned theirs off gets nothing (Searcher.scope). only: these users' marks
+    alone (all the searchers are still needed, for the admins who follow everyone).
+    """
+    anyone: bool | None = None
     for searcher in searchers:
-        mark(listing, searcher.user_id).matches = listing_matches(listing, searcher.criteria)
+        if only is not None and searcher.user_id not in only:
+            continue
+        if searcher.scope == "own":
+            fits = listing_matches(listing, searcher.criteria)
+        elif searcher.scope == "everyone":
+            if anyone is None:
+                anyone = any(
+                    listing_matches(listing, other.criteria)
+                    for other in searchers
+                    if other.searching
+                )
+            fits = anyone
+        else:
+            fits = False
+        mark(listing, searcher.user_id).matches = fits
 
 
 def interested(listing: Listing) -> list[int]:
@@ -258,15 +280,20 @@ async def mark_removed(session: AsyncSession, source: str, now: datetime) -> int
     return result.rowcount or 0
 
 
-async def rematch_user(session: AsyncSession, user_id: int, criteria: SearchCriteria) -> int:
-    """Judge every stored listing against one user's search, after it changed or for a new
-    user. Returns how many listings fit."""
-    fitting = 0
+async def rematch(session: AsyncSession, searchers: Sequence[Searcher], user_ids: set[int]) -> None:
+    """Judge every stored listing again for these users, after their search changed (or the
+    user is new, or was turned on or off). The admins who follow everyone's searches are
+    judged again too, since what they see is made of the others' searches."""
+    targets = user_ids | {
+        searcher.user_id for searcher in searchers if searcher.scope == "everyone"
+    }
     for listing in await session.scalars(select(Listing)):
-        found = mark(listing, user_id)
-        found.matches = listing_matches(listing, criteria)
-        fitting += found.matches
-    return fitting
+        judge(listing, searchers, targets)
+
+
+async def rematch_user(session: AsyncSession, user_id: int) -> None:
+    """rematch for one user, with everyone's settings as saved in this session."""
+    await rematch(session, await load_searchers(session), {user_id})
 
 
 async def refresh_listings(session: AsyncSession, searchers: Sequence[Searcher]) -> int:

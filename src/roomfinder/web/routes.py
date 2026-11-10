@@ -51,6 +51,7 @@ from roomfinder.settings_store import (
     Schedule,
     get_schedule,
     save_schedule,
+    search_scope,
     set_user_criteria,
     set_user_preferences,
     user_criteria,
@@ -69,6 +70,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 DESTINATION_LIMIT = 200
 MAX_BUS_LINES = 10
 PAGE_SIZE = 48
+# The offline copy of a tab holds up to this many listings
+EXPORT_LIMIT = 2000
 # The map shows a tab's listings all at once, up to this many
 MAP_LIMIT = 1000
 PRICE_DROP_WINDOW = timedelta(days=14)
@@ -164,6 +167,8 @@ def _shared_context(request: Request) -> dict[str, Any]:
         "destination": user_preferences(user).directions_destination,
         # A walk to a bus line up to this long is lit on the card
         "bus_limit": user_criteria(user).bus_max_minutes,
+        # Whose searches pick the user's listings (an admin may follow everyone's, or none)
+        "search_scope": search_scope(user),
     }
 
 
@@ -405,6 +410,16 @@ def _criteria_summary(criteria: SearchCriteria) -> str:
     return " · ".join(parts)
 
 
+def _search_summary(user: User) -> str:
+    """What picks the listings the user sees, above the listings."""
+    scope = search_scope(user)
+    if scope == "everyone":
+        return "החיפושים של כל המשתמשים"
+    if scope == "none":
+        return "בלי חיפוש: רק מודעות שסימנת"
+    return _criteria_summary(user_criteria(user))
+
+
 def _rooms_summary(criteria: SearchCriteria) -> str:
     if criteria.rooms_min == criteria.rooms_max:
         return f"{formatting.rooms(criteria.rooms_min)} חדרים"
@@ -460,7 +475,7 @@ async def listings_page(request: Request) -> HTMLResponse:
             "view_query": lambda view: filters.query(tab=tab, view=view),
             "areas": await _known_areas(session),
             "latest_id": await session.scalar(select(func.max(Listing.id))) or 0,
-            "criteria_summary": _criteria_summary(user_criteria(request.state.user)),
+            "criteria_summary": _search_summary(request.state.user),
         }
         return await render_page(request, session, "listings.html", context)
 
@@ -710,6 +725,35 @@ async def export_csv(request: Request) -> Response:
     )
 
 
+@router.get("/export.html")
+async def export_html(request: Request) -> Response:
+    """A tab's listings, with the filters on the page, as one self-contained HTML file: it
+    opens offline on any phone or computer, unlike the dashboard (the photos need a
+    connection, and are left out without one)."""
+    settings: Settings = request.app.state.settings
+    filters = ListingFilters.from_request(request)
+    tab = filters.tab or "all"
+    async with _sessionmaker(request)() as session:
+        query = _ordered(_listings_query(filters, tab, _user_id(request)), filters.sort)
+        listings = list(await session.scalars(query.limit(EXPORT_LIMIT + 1)))
+        cards = await _cards(session, listings[:EXPORT_LIMIT], request.state.user)
+    made_at = formatting.local_datetime(utcnow(), settings.timezone)
+    context = {
+        "cards": cards,
+        "cut_off": len(listings) > EXPORT_LIMIT,
+        "tab_label": dict(TABS)[tab],
+        "filters": filters,
+        "summary": _search_summary(request.state.user),
+        "made_at": made_at,
+        "search": filters.search,
+    }
+    response = render_partial(request, "export.html", context)
+    # dd/mm/yyyy as yyyy-mm-dd, so the saved copies sort by date
+    day = "-".join(reversed(made_at[:10].split("/")))
+    response.headers["Content-Disposition"] = f'attachment; filename="roomfinder-{day}.html"'
+    return response
+
+
 # --- sources -------------------------------------------------------------------
 
 
@@ -779,7 +823,7 @@ async def sources_page(request: Request) -> HTMLResponse:
                 f"{search.city} · {_rooms_summary(search)} · {_price_range(search)}"
                 for search in fetch_plan(searchers, None)
             ],
-            "searching_users": sum(1 for searcher in searchers if searcher.active),
+            "searching_users": sum(1 for searcher in searchers if searcher.searching),
         }
         return await render_page(request, session, "sources.html", context)
 
@@ -930,7 +974,7 @@ async def save_areas(request: Request) -> RedirectResponse:
             }
         )
         set_user_criteria(me, criteria)
-        await rematch_user(session, me.id, criteria)
+        await rematch_user(session, me.id)
         await session.commit()
     return RedirectResponse("/areas?saved=1", status_code=303)
 
@@ -943,11 +987,27 @@ SAVED_MESSAGES = {
     "schedule": "שעות הבדיקה נשמרו.",
     "bus": "קווי האוטובוס נשמרו. מסלולי ההליכה מחושבים עכשיו; עד אז מוצגת הערכה (~).",
     "bus_rule": "ההגדרה נשמרה. ההתאמה של המודעות לחיפוש שלך חושבה מחדש.",
+    "scope": "נשמר. המודעות שמוצגות לך חושבו מחדש.",
 }
 FAILED_MESSAGES = {
     "bus": "לא הצלחתי לקרוא את התחנות של הקו כרגע. אפשר לנסות שוב עוד מעט.",
     "bus_limit": f"אפשר לבחור עד {MAX_BUS_LINES} קווים.",
 }
+SEARCH_SCOPES = [
+    ("own", "לפי החיפוש שלי", "כמו כל משתמש: המודעות וההתראות לפי החיפוש שלמטה."),
+    (
+        "everyone",
+        "כל מה שמוצג למשתמשים האחרים",
+        "מודעה שמתאימה לחיפוש של משתמש פעיל כלשהו, עם התראות עליהן. החיפוש שלך לא משנה"
+        " את מה שנקרא מהאתרים.",
+    ),
+    (
+        "none",
+        "בלי חיפוש",
+        "שום מודעה לא מתאימה ואין התראות על מודעות. מה שסימנת (מועדפים, פניתי) נשאר,"
+        ' ואפשר עדיין לראות הכול עם "להציג גם מודעות שלא מתאימות".',
+    ),
+]
 BUS_RULES = [
     ("any", "לפחות אחד מהקווים במרחק הליכה"),
     ("all", "כל הקווים במרחק הליכה"),
@@ -965,6 +1025,7 @@ async def settings_page(request: Request, saved: str = "", failed: str = "") -> 
             "saved": SAVED_MESSAGES.get(saved),
             "failed": FAILED_MESSAGES.get(failed),
             "bus_rules": BUS_RULES,
+            "scopes": SEARCH_SCOPES,
             "criteria": criteria,
             "areas_summary": _areas_summary(criteria),
             "has_area_map": areas.city_map(criteria.city) is not None,
@@ -1022,7 +1083,7 @@ async def save_search_criteria(request: Request) -> RedirectResponse:
         except (ValidationError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
         set_user_criteria(me, criteria)
-        await rematch_user(session, me.id, criteria)
+        await rematch_user(session, me.id)
         await session.commit()
     return RedirectResponse("/settings?saved=criteria", status_code=303)
 
@@ -1070,7 +1131,7 @@ async def _work_out_walks(app: Any, user_id: int) -> None:
     async with sessionmaker() as session:
         user = await session.get(User, user_id)
         if user is not None:
-            await rematch_user(session, user.id, user_criteria(user))
+            await rematch_user(session, user.id)
             await session.commit()
 
 
@@ -1082,7 +1143,7 @@ async def _save_bus_criteria(request: Request, changes: dict[str, Any]) -> None:
         except ValidationError as exc:
             raise HTTPException(400, str(exc)) from exc
         set_user_criteria(me, criteria)
-        await rematch_user(session, me.id, criteria)
+        await rematch_user(session, me.id)
         await session.commit()
 
 
@@ -1152,6 +1213,21 @@ async def save_notification_preferences(request: Request) -> RedirectResponse:
         set_user_preferences(user, user_preferences(user).model_copy(update=changes))
         await session.commit()
     return RedirectResponse("/settings?saved=preferences", status_code=303)
+
+
+@router.post("/settings/search-scope", dependencies=[Depends(require_admin)])
+async def save_search_scope(request: Request) -> RedirectResponse:
+    scope = (await request.form()).get("search_scope")
+    if scope not in {value for value, _, _ in SEARCH_SCOPES}:
+        raise HTTPException(400, "Unknown choice")
+    async with _sessionmaker(request)() as session:
+        me = await _me(request, session)
+        preferences = user_preferences(me)
+        preferences.search_scope = scope
+        set_user_preferences(me, preferences)
+        await rematch_user(session, me.id)
+        await session.commit()
+    return RedirectResponse("/settings?saved=scope", status_code=303)
 
 
 @router.post("/settings/schedule", dependencies=[Depends(require_admin)])

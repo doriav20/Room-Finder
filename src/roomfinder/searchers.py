@@ -18,7 +18,7 @@ from roomfinder.matching import ListingLike, listing_matches
 from roomfinder.models import User
 from roomfinder.normalize import normalize_city
 from roomfinder.schemas import PropertyType, SearchCriteria
-from roomfinder.settings_store import Preferences, user_criteria, user_preferences
+from roomfinder.settings_store import Preferences, SearchScope, user_criteria, user_preferences
 
 # The sites are read without what each user filters by locally (the rest have neutral defaults)
 NO_LOCAL_FILTERS: dict[str, Any] = {"exclude_keywords": []}
@@ -31,6 +31,16 @@ class Searcher:
     is_admin: bool
     criteria: SearchCriteria
     preferences: Preferences
+
+    @property
+    def scope(self) -> SearchScope:
+        """Whose searches pick the user's listings (settings_store.search_scope)."""
+        return self.preferences.search_scope if self.is_admin else "own"
+
+    @property
+    def searching(self) -> bool:
+        """Whether the sites are read with this user's own search."""
+        return self.active and self.scope == "own"
 
 
 async def load_searchers(session: AsyncSession) -> list[Searcher]:

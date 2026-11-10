@@ -5,6 +5,7 @@ a JSON row in the settings table, and only admins change it.
 """
 
 from datetime import time
+from typing import Literal
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +15,15 @@ from roomfinder.schemas import SearchCriteria
 
 SCHEDULE_KEY = "schedule"
 
+# Whose searches decide which listings fit an admin, and which they're notified about: their
+# own; any active user's own (to see what everyone is shown); or nobody's, so only the
+# listings they marked show. Members always use their own
+SearchScope = Literal["own", "everyone", "none"]
+
 
 class Preferences(BaseModel):
-    """One user's notifications, and where their directions links lead."""
+    """One user's notifications, where their directions links lead, and (admins) whose
+    searches pick their listings."""
 
     notifications_paused: bool = False
     notify_price_drops: bool = True
@@ -25,6 +32,8 @@ class Preferences(BaseModel):
     quiet_hours_end: time = time(7, 0)
     # The directions links of the listings lead here; empty leaves it to fill in on the map
     directions_destination: str = ""
+    # Admins only (see SearchScope)
+    search_scope: SearchScope = "own"
 
 
 class Schedule(BaseModel):
@@ -45,6 +54,10 @@ def set_user_criteria(user: User, criteria: SearchCriteria) -> None:
 
 def user_preferences(user: User) -> Preferences:
     return Preferences.model_validate(user.preferences or {})
+
+
+def search_scope(user: User) -> SearchScope:
+    return user_preferences(user).search_scope if user.is_admin else "own"
 
 
 def set_user_preferences(user: User, preferences: Preferences) -> None:
